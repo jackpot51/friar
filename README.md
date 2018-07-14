@@ -1,2 +1,2 @@
 # friar
-Free Rust Implementation of Augmented Reality
+Free Rust Implementation of Augmented Reality (WIP)
