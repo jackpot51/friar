@@ -1,0 +1,37 @@
+use reference::Reference;
+use perspective::Perspective;
+
+pub struct Position<'r, R: Reference + 'r> {
+    pub reference: &'r R,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+impl<'r, R: Reference> Position<'r, R> {
+    /// Create a new Position
+    pub fn new(reference: &'r R, x: f64, y: f64, z: f64) -> Self {
+        Self {
+            reference,
+            x,
+            y,
+            z,
+        }
+    }
+
+    /// Create Perspective from this Position
+    pub fn perspective(&'r self, rx: f64, ry: f64, rz: f64) -> Perspective<'r, R> {
+        Perspective::new(self, rx, ry, rz)
+    }
+}
+
+/* TODO: Find a way to do this without iteration
+impl<R: Spheroid> Position<R> {
+    /// Convert to Coordinate
+    ///
+    /// Adapted from https://en.wikipedia.org/wiki/Geographic_coordinate_conversion#From_ECEF_to_geodetic_coordinates
+    pub fn coordinate() -> Coordinate<R> {
+
+    }
+}
+*/
