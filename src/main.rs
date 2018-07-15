@@ -88,27 +88,27 @@ fn main() {
             match event.to_option() {
                 EventOption::Key(key_event) => match key_event.scancode {
                     orbclient::K_W if key_event.pressed => {
-                        viewer = viewer.offset(1.0, rx);
+                        viewer = viewer.offset(1.0, rx, 0.0);
                         redraw = true;
                     },
                     orbclient::K_S if key_event.pressed => {
-                        viewer = viewer.offset(-1.0, rx);
+                        viewer = viewer.offset(-1.0, rx, 0.0);
                         redraw = true;
                     },
                     orbclient::K_A if key_event.pressed => {
-                        viewer = viewer.offset(-1.0, rx + 90.0);
+                        viewer = viewer.offset(-1.0, rx + 90.0, 0.0);
                         redraw = true;
                     },
                     orbclient::K_D if key_event.pressed => {
-                        viewer = viewer.offset(1.0, rx + 90.0);
+                        viewer = viewer.offset(1.0, rx + 90.0, 0.0);
                         redraw = true;
                     },
                     orbclient::K_Q if key_event.pressed => {
-                        viewer.elevation += 1.0;
+                        viewer = viewer.offset(1.0, 0.0, 90.0);
                         redraw = true;
                     },
                     orbclient::K_E if key_event.pressed => {
-                        viewer.elevation -= 1.0;
+                        viewer = viewer.offset(-1.0, 0.0, 90.0);
                         redraw = true;
                     },
 
