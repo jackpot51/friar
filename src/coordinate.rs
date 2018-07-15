@@ -21,6 +21,11 @@ impl<'r, R: Spheroid> Coordinate<'r, R> {
         }
     }
 
+    /// Duplicate this coordinate
+    pub fn duplicate(&self) -> Self {
+        Self::new(self.reference, self.latitude, self.longitude, self.elevation)
+    }
+
     /// Radius of the spheroid plus elevation at given coordinate, in meters
     ///
     /// Adapted from https://en.wikipedia.org/wiki/Earth_radius#Location-dependent_radii
@@ -71,6 +76,34 @@ impl<'r, R: Spheroid> Coordinate<'r, R> {
         ).mod_euc(2.0 * f64::consts::PI).to_degrees()
     }
 
+    pub fn offset(&self, distance: f64, heading: f64, pitch: f64) -> Self {
+        let f1 = self.latitude.to_radians();
+        let l1 = self.longitude.to_radians();
+        let h = heading.to_radians();
+        let p = pitch.to_radians();
+        let d = distance * p.cos() / self.radius();
+        let e = distance * p.sin();
+
+        let f2 = (
+            f1.sin() * d.cos() + f1.cos() * d.sin() * h.cos()
+        ).asin();
+        let dl = (
+            h.sin() * d.sin() * f1.cos()
+        ).atan2(
+            d.cos() - f1.sin() * f2.sin()
+        );
+        let l2 = (
+            l1 + dl + f64::consts::PI
+        ).mod_euc(2.0 * f64::consts::PI) - f64::consts::PI;
+
+        Self {
+            reference: self.reference,
+            latitude: f2.to_degrees(),
+            longitude: l2.to_degrees(),
+            elevation: self.elevation + e,
+        }
+    }
+
     /// Convert to Position
     ///
     /// Adapted from https://en.wikipedia.org/wiki/Geographic_coordinate_conversion#From_geodetic_to_ECEF_coordinates
@@ -91,5 +124,26 @@ impl<'r, R: Spheroid> Coordinate<'r, R> {
         let z = ((b.powi(2) / a.powi(2)) * n + h) * f.sin();
 
         Position::new(self.reference, x, y, z)
+    }
+
+    /// Get rotation numbers in ECEF
+    //TODO: Use ry, rz
+    pub fn rotation(&self, rx: f64, ry: f64, rz: f64) -> (f64, f64, f64) {
+        let f = self.latitude.to_radians();
+        let l = self.longitude.to_radians();
+
+        let rxr = rx.to_radians();
+        let ryr = ry.to_radians();
+        let rzr = rz.to_radians();
+
+        let rxc = 0.0;
+        let ryc = (f + f64::consts::PI/2.0).mod_euc(2.0 * f64::consts::PI);
+        let rzc = (l + f64::consts::PI).mod_euc(2.0 * f64::consts::PI);
+
+        let rxe = rxc + rxr;
+        let rye = ryc;
+        let rze = rzc;
+
+        (rxe.to_degrees(), rye.to_degrees(), rze.to_degrees())
     }
 }
