@@ -12,13 +12,14 @@ fn main() {
     let earth = Earth;
 
     let red = earth.coordinate(39.73922277, -104.9888542, 1597.0);
-    let red_pos = red.position();
-
     let green = earth.coordinate(39.73923927, -104.98668697, 1600.0);
-    let green_pos = green.position();
-
     let blue = earth.coordinate(39.73926402, -104.9847987, 1608.0);
-    let blue_pos = blue.position();
+
+    let mut spheres = vec![
+        (red.position(), Color::rgb(0xFF, 0x00, 0x00), "red".to_string()),
+        (green.position(), Color::rgb(0x00, 0xFF, 0x00), "green".to_string()),
+        (blue.position(), Color::rgb(0x00, 0x00, 0xFF), "blue".to_string()),
+    ];
 
     let origin = earth.coordinate(39.73924752, -104.99111798, 1597.0);
     let mut viewer = origin.duplicate();
@@ -27,13 +28,14 @@ fn main() {
     let mut rx = 90.0;
     let mut ry = 0.0;
     let mut rz = 0.0;
-    let mut circles = Vec::with_capacity(3);
+    let mut circles = Vec::with_capacity(spheres.len());
     loop {
         if redraw {
             let viewer_pos = viewer.position();
             let viewer_rot = viewer.rotation(rx, ry, rz);
             let perspective = viewer_pos.perspective(viewer_rot.0, viewer_rot.1, viewer_rot.2);
             let viewport = perspective.viewport(0.0, 0.0, 1.0);
+            let screen = viewport.screen(w.width() as f64, w.height() as f64, 4800.0);
 
             println!("position: {}, {}, {}", viewer.latitude, viewer.longitude, viewer.elevation);
             println!("position ECEF: {}, {}, {}", viewer_pos.x, viewer_pos.y, viewer_pos.z);
@@ -42,31 +44,10 @@ fn main() {
 
             circles.clear();
 
-            {
-                let name = "red";
-                let color = Color::rgb(0xFF, 0x00, 0x00);
-                let (x, y, z) = viewport.transform(&red_pos);
-                let (px, py, pz) = ((x + 0.5) * 800.0, (y + 0.5) * 600.0, z * 4800.0);
-                println!("{}: {}, {}, {} => {}, {}, {}", name, x, y, z, px, py, pz);
-                circles.push((px, py, pz, color));
-            }
-
-            {
-                let name = "green";
-                let color = Color::rgb(0x00, 0xFF, 0x00);
-                let (x, y, z) = viewport.transform(&green_pos);
-                let (px, py, pz) = ((x + 0.5) * 800.0, (y + 0.5) * 600.0, z * 4800.0);
-                println!("{}: {}, {}, {} => {}, {}, {}", name, x, y, z, px, py, pz);
-                circles.push((px, py, pz, color));
-            }
-
-            {
-                let name = "blue";
-                let color = Color::rgb(0x00, 0x00, 0xFF);
-                let (x, y, z) = viewport.transform(&blue_pos);
-                let (px, py, pz) = ((x + 0.5) * 800.0, (y + 0.5) * 600.0, z * 4800.0);
-                println!("{}: {}, {}, {} => {}, {}, {}", name, x, y, z, px, py, pz);
-                circles.push((px, py, pz, color));
+            for sphere in spheres.iter() {
+                let (px, py, pz) = screen.transform(&sphere.0);
+                println!("{}: {}, {}, {}", sphere.2, px, py, pz);
+                circles.push((px, py, pz, sphere.1));
             }
 
             circles.sort_unstable_by(|a, b| a.2.partial_cmp(&b.2).unwrap());

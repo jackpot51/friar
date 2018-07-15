@@ -1,6 +1,7 @@
 use perspective::Perspective;
 use position::Position;
 use reference::Reference;
+use screen::Screen;
 
 //TODO: Turn into trait
 pub struct Viewport<'r, R: Reference + 'r> {
@@ -22,7 +23,7 @@ impl<'r, R: Reference> Viewport<'r, R> {
     }
 
     /// Transform from reference Position into the Viewport's plane
-    //TODO: Return Position<Viewport>
+    //TODO: Return Position<Viewport>?
     pub fn transform(&self, point: &Position<'r, R>) -> (f64, f64, f64) {
         let d = self.perspective.transform(point);
 
@@ -31,5 +32,9 @@ impl<'r, R: Reference> Viewport<'r, R> {
         let by = bz * d.y + self.y;
 
         (bx, by, bz)
+    }
+
+    pub fn screen(&'r self, x: f64, y: f64, z: f64) -> Screen<'r, R> {
+        Screen::new(self, x, y, z)
     }
 }
