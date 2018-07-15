@@ -23,7 +23,7 @@ impl<'r, R: Reference> Viewport<'r, R> {
 
     /// Transform from reference Position into the Viewport's plane
     //TODO: Return Position<Viewport>
-    pub fn transform(&self, point: Position<'r, R>) -> (f64, f64, f64) {
+    pub fn transform(&self, point: &Position<'r, R>) -> (f64, f64, f64) {
         let d = self.perspective.transform(point);
 
         let bz = self.z / d.z;

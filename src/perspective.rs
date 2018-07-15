@@ -26,7 +26,7 @@ impl<'r, R: Reference> Perspective<'r, R> {
     /// Transform the point into one relative to the Perspective
     ///
     /// Adapted from https://en.wikipedia.org/wiki/3D_projection#Perspective_projection
-    pub fn transform(&self, from: Position<'r, R>) -> Position<Self> {
+    pub fn transform(&self, from: &Position<'r, R>) -> Position<Self> {
         let x = from.x - self.position.x;
         let y = from.y - self.position.y;
         let z = from.z - self.position.z;
