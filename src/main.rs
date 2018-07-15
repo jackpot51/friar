@@ -48,7 +48,7 @@ fn main() {
                 let (x, y, z) = viewport.transform(&red_pos);
                 let (px, py, pz) = ((x + 0.5) * 800.0, (y + 0.5) * 600.0, z * 4800.0);
                 println!("{}: {}, {}, {} => {}, {}, {}", name, x, y, z, px, py, pz);
-                circles.push((px as i32, py as i32, pz as i32, color));
+                circles.push((px, py, pz, color));
             }
 
             {
@@ -57,7 +57,7 @@ fn main() {
                 let (x, y, z) = viewport.transform(&green_pos);
                 let (px, py, pz) = ((x + 0.5) * 800.0, (y + 0.5) * 600.0, z * 4800.0);
                 println!("{}: {}, {}, {} => {}, {}, {}", name, x, y, z, px, py, pz);
-                circles.push((px as i32, py as i32, pz as i32, color));
+                circles.push((px, py, pz, color));
             }
 
             {
@@ -66,16 +66,16 @@ fn main() {
                 let (x, y, z) = viewport.transform(&blue_pos);
                 let (px, py, pz) = ((x + 0.5) * 800.0, (y + 0.5) * 600.0, z * 4800.0);
                 println!("{}: {}, {}, {} => {}, {}, {}", name, x, y, z, px, py, pz);
-                circles.push((px as i32, py as i32, pz as i32, color));
+                circles.push((px, py, pz, color));
             }
 
-            circles.sort_unstable_by_key(|circle| circle.2);
+            circles.sort_unstable_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
 
             w.set(Color::rgb(0, 0, 0));
 
             for circle in circles.iter() {
-                if circle.2 >= 0 {
-                    w.circle(circle.0, circle.1, -circle.2, circle.3);
+                if circle.2 > 0.0 {
+                    w.circle(circle.0 as i32, circle.1 as i32, -circle.2 as i32, circle.3);
                 }
             }
 
@@ -92,11 +92,11 @@ fn main() {
                         redraw = true;
                     },
                     orbclient::K_S if key_event.pressed => {
-                        viewer = viewer.offset(-1.0, rx, 0.0);
+                        viewer = viewer.offset(1.0, rx + 180.0, 0.0);
                         redraw = true;
                     },
                     orbclient::K_A if key_event.pressed => {
-                        viewer = viewer.offset(-1.0, rx + 90.0, 0.0);
+                        viewer = viewer.offset(1.0, rx + 270.0, 0.0);
                         redraw = true;
                     },
                     orbclient::K_D if key_event.pressed => {
@@ -108,7 +108,7 @@ fn main() {
                         redraw = true;
                     },
                     orbclient::K_E if key_event.pressed => {
-                        viewer = viewer.offset(-1.0, 0.0, 90.0);
+                        viewer = viewer.offset(1.0, 0.0, 270.0);
                         redraw = true;
                     },
 
