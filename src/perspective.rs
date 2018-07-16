@@ -50,6 +50,7 @@ impl<'r, R: Reference> Perspective<'r, R> {
         Position::new(self, dx, dy, dz)
     }
 
+    /// Create a viewport with this perspective
     pub fn viewport(&'r self, x: f64, y: f64, z: f64) -> Viewport<'r, R> {
         Viewport::new(self, x, y, z)
     }

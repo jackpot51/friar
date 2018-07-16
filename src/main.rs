@@ -1,3 +1,5 @@
+#![feature(euclidean_division)]
+
 extern crate friar;
 extern crate orbclient;
 
@@ -5,57 +7,9 @@ use friar::coordinate::Coordinate;
 use friar::earth::Earth;
 use friar::reference::Reference;
 use friar::spheroid::Spheroid;
-use orbclient::{Color, EventOption, Renderer, Window};
-
-// Rediculously complicated formula for angles from http://pandora.nla.gov.au/pan/24764/20060809-0000/DSTO-TN-0640.pdf
-fn complicated(plane: &Coordinate<Earth>, heading: f64, pitch: f64, roll: f64) -> (f64, f64, f64) {
-    let plane_pos = plane.position();
-
-    let north = plane.offset(1.0, 0.0, 0.0);
-    let north_pos = north.position();
-    let east = plane.offset(1.0, 90.0, 0.0);
-    let east_pos = east.position();
-    let down = plane.offset(-1.0, 0.0, 90.0);
-    let down_pos = down.position();
-
-    let x0 = plane_pos.vector(&north_pos).normalize();
-    let y0 = plane_pos.vector(&east_pos).normalize();
-    let z0 = plane_pos.vector(&down_pos).normalize();
-
-    let x1 = x0.rotate(&z0, heading);
-    let y1 = y0.rotate(&z0, heading);
-    //let z1 = z0.rotate(&z0, heading);
-
-    let x2 = x1.rotate(&y1, pitch);
-    let y2 = y1.rotate(&y1, pitch);
-    //let z2 = z1.rotate(&y1, pitch);
-
-    let x3 = x2.rotate(&x2, roll);
-    let y3 = y2.rotate(&x2, roll);
-    //let z3 = z2.rotate(&x2, roll);
-
-    {
-        let x0 = plane.reference.vector(1.0, 0.0, 0.0);
-        let y0 = plane.reference.vector(0.0, 1.0, 0.0);
-        let z0 = plane.reference.vector(0.0, 0.0, 1.0);
-
-        let psi = x3.dot(&y0).atan2(
-            x3.dot(&x0)
-        );
-        let theta = (-x3.dot(&z0)).atan2(
-            (x3.dot(&x0).powi(2) + x3.dot(&y0).powi(2)).sqrt()
-        );
-
-        let y1 = y0.rotate(&z0, psi.to_degrees());
-        let z2 = z0.rotate(&y1, theta.to_degrees());
-
-        let phi = y3.dot(&z2).atan2(
-            y3.dot(&y1)
-        );
-
-        (phi.to_degrees(), theta.to_degrees(), psi.to_degrees())
-    }
-}
+use orbclient::{Color, EventOption, Renderer, Window, WindowFlag};
+use std::fmt::{self, Write};
+use std::time::Instant;
 
 // Test conformance to http://pandora.nla.gov.au/pan/24764/20060809-0000/DSTO-TN-0640.pdf
 fn test() {
@@ -146,10 +100,39 @@ fn test() {
     }
 }
 
+struct WindowWriter<'a> {
+    window: &'a mut Window,
+    x: i32,
+    y: i32,
+    color: Color,
+}
+
+impl<'a> WindowWriter<'a> {
+    fn new(window: &'a mut Window, x: i32, y: i32, color: Color) -> Self {
+        Self {
+            window,
+            x,
+            y,
+            color
+        }
+    }
+}
+
+impl<'a> fmt::Write for WindowWriter<'a> {
+    fn write_str(&mut self, s: &str) -> Result<(), fmt::Error> {
+        for c in s.chars() {
+            self.window.char(self.x, self.y, c, self.color);
+            self.x += 8;
+        }
+
+        Ok(())
+    }
+}
+
 fn main() {
     test();
 
-    let mut w = Window::new(-1, -1, 800, 600, "FRIAR").unwrap();
+    let mut w = Window::new_flags(-1, -1, 800, 600, "FRIAR", &[WindowFlag::Async]).unwrap();
 
     let earth = Earth;
 
@@ -167,36 +150,57 @@ fn main() {
         (blue.position(), Color::rgb(0x00, 0x00, 0xFF), "blue".to_string()),
     ];
 
-    let origin = earth.coordinate(39.73922277, -104.99111798, 1597.0);
+    let origin = earth.coordinate(39.73922277, -104.99111798, 1599.0);
     let mut viewer = origin.duplicate();
 
     let mut redraw = true;
+    let mut first = true;
     let mut heading = viewer.heading(&red);
     let mut pitch = 0.0;
     let mut roll = 0.0;
     let mut circles = Vec::with_capacity(spheres.len());
+    let mut move_left = false;
+    let mut move_right = false;
+    let mut move_up = false;
+    let mut move_down = false;
+    let mut move_forward = false;
+    let mut move_aft = false;
+    let mut rotate_left = false;
+    let mut rotate_right = false;
+    let mut rotate_up = false;
+    let mut rotate_down = false;
+    let mut roll_left = false;
+    let mut roll_right = false;
+    let mut last_instant = Instant::now();
     loop {
+        let instant = Instant::now();
+        let duration = instant.duration_since(last_instant);
+        last_instant = instant;
+        let time = duration.as_secs() as f64 + duration.subsec_nanos() as f64 / 1000000000.0;
+        let speed = 100.0 * time;
+        let speed_rot = 90.0 * time;
+
         if redraw {
+            if first {
+                first = false;
+            } else {
+                redraw = false;
+            }
+
             let viewer_pos = viewer.position();
             let viewer_rot = viewer.rotation();
-            let calculated_rot = complicated(&viewer, heading, pitch, roll);
-            let perspective_rot = (90.0 - calculated_rot.1, -calculated_rot.0, 90.0 + calculated_rot.2);
-            let perspective = viewer_pos.perspective(perspective_rot.0, perspective_rot.1, perspective_rot.2);
+            let ground_perspective = viewer_pos.perspective(viewer_rot.0, viewer_rot.1, viewer_rot.2);
+            let ground_pos = ground_perspective.position(0.0, 0.0, 0.0);
+            let perspective = ground_pos.perspective(pitch + 90.0, roll, heading - 90.0);
             let viewport = perspective.viewport(0.0, 0.0, 1.0);
             let screen = viewport.screen(w.width() as f64, w.height() as f64, 3600.0);
-
-            println!("rotation: {}, {}, {}", heading, pitch, roll);
-            println!("viewer: {}", viewer);
-            println!("viewer ECEF: {}", viewer_pos);
-            println!("viewer rot: {:?}", viewer_rot);
-            println!("calculated rot: {:?}", calculated_rot);
-            println!("perspective rot: {:?}", perspective_rot);
 
             circles.clear();
 
             for sphere in spheres.iter() {
-                let (px, py, pz) = screen.transform(&sphere.0);
-                println!("{}: {}, {}, {}", sphere.2, px, py, pz);
+                let sphere_ground = ground_perspective.transform(&sphere.0);
+                let (px, py, pz) = screen.transform(&sphere_ground);
+                //println!("{}: {} => {} => {}, {}, {}", sphere.2, sphere.0, sphere_ground, px, py, pz);
                 circles.push((px, py, pz, sphere.1));
             }
 
@@ -210,61 +214,85 @@ fn main() {
                 }
             }
 
-            w.sync();
+            let center = (w.width() as i32/2, w.height() as i32/2);
+            w.line(center.0 - 5, center.1, center.0 + 5, center.1, Color::rgb(0xFF, 0xFF, 0xFF));
+            w.line(center.0, center.1 - 5, center.0, center.1 + 5, Color::rgb(0xFF, 0xFF, 0xFF));
 
-            redraw = false;
+            write!(
+                WindowWriter::new(&mut w, 0, 0, Color::rgb(0xFF, 0xFF, 0xFF)),
+                "FPS: {}",
+                1.0/time
+            );
+
+            write!(
+                WindowWriter::new(&mut w, 0, 16, Color::rgb(0xFF, 0xFF, 0xFF)),
+                "Coord: {}",
+                viewer
+            );
+
+            write!(
+                WindowWriter::new(&mut w, 0, 32, Color::rgb(0xFF, 0xFF, 0xFF)),
+                "Pos: {}",
+                viewer_pos
+            );
+
+            write!(
+                WindowWriter::new(&mut w, 0, 48, Color::rgb(0xFF, 0xFF, 0xFF)),
+                "Rot: {}, {}, {}",
+                heading, pitch, roll
+            );
+
+            w.sync();
         }
 
         for event in w.events() {
             match event.to_option() {
                 EventOption::Key(key_event) => match key_event.scancode {
-                    orbclient::K_W if key_event.pressed => {
-                        viewer = viewer.offset(1.0, heading, pitch);
-                        redraw = true;
+                    orbclient::K_W => {
+                        move_forward = key_event.pressed;
                     },
-                    orbclient::K_S if key_event.pressed => {
-                        viewer = viewer.offset(-1.0, heading, pitch);
-                        redraw = true;
+                    orbclient::K_S => {
+                        move_aft = key_event.pressed;
                     },
-                    orbclient::K_A if key_event.pressed => {
-                        viewer = viewer.offset(-1.0, heading + 90.0, 0.0);
-                        redraw = true;
+                    orbclient::K_A => {
+                        move_left = key_event.pressed;
                     },
-                    orbclient::K_D if key_event.pressed => {
-                        viewer = viewer.offset(1.0, heading + 90.0, 0.0);
-                        redraw = true;
+                    orbclient::K_D => {
+                        move_right = key_event.pressed;
                     },
-                    orbclient::K_Q if key_event.pressed => {
-                        viewer = viewer.offset(1.0, 0.0, 90.0);
-                        redraw = true;
+                    orbclient::K_Q => {
+                        move_up = key_event.pressed;
                     },
-                    orbclient::K_E if key_event.pressed => {
-                        viewer = viewer.offset(-1.0, 0.0, 90.0);
+                    orbclient::K_E => {
+                        move_down = key_event.pressed;
+                    },
+                    orbclient::K_R if key_event.pressed => {
+                        viewer = origin.duplicate();
                         redraw = true;
                     },
 
-                    orbclient::K_J if key_event.pressed => {
-                        heading -= 1.0;
-                        redraw = true;
+                    orbclient::K_J => {
+                        rotate_left = key_event.pressed;
                     },
-                    orbclient::K_L if key_event.pressed => {
-                        heading += 1.0;
-                        redraw = true;
+                    orbclient::K_L => {
+                        rotate_right = key_event.pressed;
                     },
-                    orbclient::K_I if key_event.pressed => {
-                        pitch += 1.0;
-                        redraw = true;
+                    orbclient::K_I => {
+                        rotate_down = key_event.pressed;
                     },
-                    orbclient::K_K if key_event.pressed => {
-                        pitch -= 1.0;
-                        redraw = true;
+                    orbclient::K_K => {
+                        rotate_up = key_event.pressed;
                     },
-                    orbclient::K_U if key_event.pressed => {
-                        roll -= 1.0;
-                        redraw = true;
+                    orbclient::K_U => {
+                        roll_left = key_event.pressed;
                     },
-                    orbclient::K_O if key_event.pressed => {
-                        roll += 1.0;
+                    orbclient::K_O => {
+                        roll_right = key_event.pressed;
+                    },
+                    orbclient::K_P if key_event.pressed => {
+                        heading = 90.0;
+                        pitch = 0.0;
+                        roll = 0.0;
                         redraw = true;
                     },
 
@@ -273,6 +301,66 @@ fn main() {
                 EventOption::Quit(_quit_event) => return,
                 _ => ()
             }
+        }
+
+        if move_forward {
+            viewer = viewer.offset(speed, heading, pitch);
+            redraw = true;
+        }
+
+        if move_aft {
+            viewer = viewer.offset(-speed, heading, pitch);
+            redraw = true;
+        }
+
+        if move_left {
+            viewer = viewer.offset(-speed, heading + 90.0, 0.0);
+            redraw = true;
+        }
+
+        if move_right {
+            viewer = viewer.offset(speed, heading + 90.0, 0.0);
+            redraw = true;
+        }
+
+        if move_up {
+            viewer = viewer.offset(speed, 0.0, 90.0);
+            redraw = true;
+        }
+
+        if move_down {
+            viewer = viewer.offset(-speed, 0.0, 90.0);
+            redraw = true;
+        }
+
+        if rotate_left {
+            heading = (heading - speed_rot).mod_euc(360.0);
+            redraw = true;
+        }
+
+        if rotate_right {
+            heading = (heading + speed_rot).mod_euc(360.0);
+            redraw = true;
+        }
+
+        if rotate_up {
+            pitch = (pitch + speed_rot).mod_euc(360.0);
+            redraw = true;
+        }
+
+        if rotate_down {
+            pitch = (pitch - speed_rot).mod_euc(360.0);
+            redraw = true;
+        }
+
+        if roll_left {
+            roll = (roll - speed_rot).mod_euc(360.0);
+            redraw = true;
+        }
+
+        if roll_right {
+            roll = (roll + speed_rot).mod_euc(360.0);
+            redraw = true;
         }
     }
 }
