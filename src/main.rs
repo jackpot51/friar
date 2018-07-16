@@ -46,15 +46,11 @@ impl<'a> fmt::Write for WindowWriter<'a> {
 }
 
 fn paths<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f64), ground: f64) -> Vec<(Position<'r, R>, Position<'r, R>)> {
-    let mut pbf = OsmPbfReader::new(File::open(file).unwrap());
-    let objs = pbf.get_objs_and_deps(|obj| {
-        obj.is_way() && obj.tags().contains_key("highway")
-    }).unwrap();
-
     let mut nodes: HashMap<NodeId, Node> = HashMap::new();
     let mut ways: HashMap<WayId, Way> = HashMap::new();
-    for (_id, obj) in objs {
-        match obj {
+
+    for obj_res in OsmPbfReader::new(File::open(file).unwrap()).iter() {
+        match obj_res.unwrap() {
             OsmObj::Node(node) => {
                 nodes.insert(node.id, node);
             },
@@ -72,20 +68,67 @@ fn paths<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, 
         coordinate.longitude < bounds.3
     };
 
+    let parse_height = |s: &String| -> f64 {
+        match s.replace(" m", "").parse::<f64>() {
+            Ok(height) => {
+                height
+            },
+            Err(err) => {
+                println!("Failed to parse height {}: {}", s, err);
+                0.0
+            }
+        }
+    };
+
     let mut paths = Vec::with_capacity(ways.len());
     for (_id, way) in ways.iter() {
+        // println!("{:?}", way);
+
+        let min_height = way.tags.get("min_height")
+            .map(parse_height)
+            .unwrap_or(0.0);
+
+        let height_opt = way.tags.get("height")
+            .or(way.tags.get("building:height"))
+            .map(parse_height);
+
         let mut last_coordinate_opt = None;
         for node_id in way.nodes.iter() {
             let node = &nodes[node_id];
+            // println!("  {:?}", node);
+
             let coordinate = reference.coordinate(node.lat(), node.lon(), ground);
+
             if let Some(last_coordinate) = last_coordinate_opt.take() {
                 if in_bounds(&coordinate) && in_bounds(&last_coordinate) {
+                    let last_coord_min = last_coordinate.offset(min_height, 0.0, 90.0);
+                    let coord_min = coordinate.offset(min_height, 0.0, 90.0);
+
                     paths.push((
-                        last_coordinate.position(),
-                        coordinate.position()
+                        last_coord_min.position(),
+                        coord_min.position()
                     ));
+
+                    if let Some(height) = height_opt {
+                        let last_coord_max = last_coordinate.offset(height, 0.0, 90.0);
+                        let coord_max = coordinate.offset(height, 0.0, 90.0);
+
+                        paths.push((
+                            last_coord_max.position(),
+                            coord_max.position()
+                        ));
+                        paths.push((
+                            last_coord_min.position(),
+                            last_coord_max.position()
+                        ));
+                        paths.push((
+                            coord_min.position(),
+                            coord_max.position()
+                        ));
+                    }
                 }
             }
+
             last_coordinate_opt = Some(coordinate);
         }
     }
