@@ -2,12 +2,17 @@
 
 extern crate friar;
 extern crate orbclient;
+extern crate osmpbfreader;
 
 use friar::earth::Earth;
+use friar::position::Position;
 use friar::reference::Reference;
 use friar::spheroid::Spheroid;
 use orbclient::{Color, EventOption, Renderer, Window, WindowFlag};
+use osmpbfreader::{OsmPbfReader, OsmObj, Node, NodeId, Way, WayId};
+use std::collections::HashMap;
 use std::fmt::{self, Write};
+use std::fs::File;
 use std::time::Instant;
 
 struct WindowWriter<'a> {
@@ -39,47 +44,66 @@ impl<'a> fmt::Write for WindowWriter<'a> {
     }
 }
 
+fn paths<'r, R: Spheroid>(reference: &'r R, file: &str, ground: f64) -> Vec<(Position<'r, R>, Position<'r, R>)> {
+    let mut pbf = OsmPbfReader::new(File::open(file).unwrap());
+    let objs = pbf.get_objs_and_deps(|obj| {
+        obj.is_way() && obj.tags().contains_key("highway")
+    }).unwrap();
+
+    let mut nodes: HashMap<NodeId, Node> = HashMap::new();
+    let mut ways: HashMap<WayId, Way> = HashMap::new();
+    for (_id, obj) in objs {
+        match obj {
+            OsmObj::Node(node) => {
+                nodes.insert(node.id, node);
+            },
+            OsmObj::Way(way) => {
+                ways.insert(way.id, way);
+            },
+            _ => ()
+        }
+    }
+
+    let mut paths = Vec::with_capacity(ways.len());
+    for (_id, way) in ways.iter() {
+        println!("{:?}", way);
+
+        let mut last_position_opt = None;
+        for node_id in way.nodes.iter() {
+            let node = &nodes[node_id];
+            println!("  {:?}", node);
+
+            let coordinate = reference.coordinate(node.lat(), node.lon(), ground);
+            let position = coordinate.position().duplicate();
+            println!("    {}", position);
+            if let Some(last_position) = last_position_opt.take() {
+                paths.push((last_position, position.duplicate()));
+            }
+            last_position_opt = Some(position);
+        }
+    }
+
+    paths
+}
+
 fn main() {
     let mut w = Window::new_flags(-1, -1, 800, 600, "FRIAR", &[WindowFlag::Async, WindowFlag::Resizable]).unwrap();
 
     let earth = Earth;
 
     let origin = earth.coordinate(39.73922277, -104.99111798, 1599.0);
-    let km_sw = origin.offset(1000.0, 225.0, 0.0);
-    let km_ne = origin.offset(1000.0, 45.0, 0.0);
 
-    println!("Origin {}", origin);
-    println!("1km SW {}", km_sw);
-    println!("1km NE {}", km_ne);
-    println!(
-        "OSM: https://www.openstreetmap.org/api/0.6/map?bbox={},{},{},{}",
-        km_sw.longitude, km_sw.latitude,
-        km_ne.longitude, km_ne.latitude
-    );
-
-    let red = earth.coordinate(39.73922277, -104.9888542, 1597.0);
-    let orange = earth.coordinate(39.739949, -104.988843, 1597.0);
-    let yellow = earth.coordinate(39.738573, -104.988848 , 1597.0);
-    let green = earth.coordinate(39.73923927, -104.98668697, 1600.0);
-    let blue = earth.coordinate(39.73926402, -104.9847987, 1608.0);
-
-    let spheres = vec![
-        (red.position(), Color::rgb(0xFF, 0x00, 0x00), "red".to_string()),
-        (orange.position(), Color::rgb(0xFF, 0x7F, 0x00), "orange".to_string()),
-        (yellow.position(), Color::rgb(0xFF, 0xFF, 0x00), "yellow".to_string()),
-        (green.position(), Color::rgb(0x00, 0xFF, 0x00), "green".to_string()),
-        (blue.position(), Color::rgb(0x00, 0x00, 0xFF), "blue".to_string()),
-    ];
+    let paths = paths(&earth, "res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf", 1597.0);
 
     let mut redraw = true;
     let mut first = true;
 
     let mut viewer = origin.duplicate();
-    let mut heading = viewer.heading(&red);
+    let mut heading = 90.0;
     let mut pitch = 0.0;
     let mut roll = 0.0;
 
-    let mut circles = Vec::with_capacity(spheres.len());
+    let mut lines = Vec::with_capacity(paths.len());
 
     let mut move_left = false;
     let mut move_right = false;
@@ -113,32 +137,40 @@ fn main() {
 
             let viewer_pos = viewer.position();
             let viewer_rot = viewer.rotation();
+
             let ground_perspective = viewer_pos.perspective(viewer_rot.0, viewer_rot.1, viewer_rot.2);
             let ground_pos = ground_perspective.position(0.0, 0.0, 0.0);
+
             let perspective = ground_pos.perspective(pitch + 90.0, roll, heading - 90.0);
             let viewport = perspective.viewport(0.0, 0.0, 1.0);
-            let screen = viewport.screen(w.width() as f64, w.height() as f64, 3600.0);
 
-            circles.clear();
+            let w_w = w.width() as f64;
+            let w_h = w.height() as f64;
+            let screen = viewport.screen(w_w, w_h, 3600.0);
 
-            for sphere in spheres.iter() {
-                let sphere_ground = ground_perspective.transform(&sphere.0);
-                let (px, py, pz) = screen.transform(&sphere_ground);
-                //println!("{}: {} => {} => {}, {}, {}", sphere.2, sphere.0, sphere_ground, px, py, pz);
-                circles.push((px, py, pz, sphere.1));
+            lines.clear();
+
+            for path in paths.iter() {
+                let a_ground = ground_perspective.transform(&path.0);
+                let a_screen = screen.transform(&a_ground);
+                let b_ground = ground_perspective.transform(&path.1);
+                let b_screen = screen.transform(&b_ground);
+                lines.push((a_screen, b_screen, (a_screen.2 + b_screen.2)/2.0, Color::rgb(0xFF, 0xFF, 0xFF)));
             }
 
-            circles.sort_unstable_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+            lines.sort_unstable_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
 
             w.set(Color::rgb(0, 0, 0));
 
-            for circle in circles.iter() {
-                if circle.2 > 0.0 {
-                    w.circle(circle.0 as i32, circle.1 as i32, -circle.2 as i32, circle.3);
+            for line in lines.iter() {
+                let a = line.0;
+                let b = line.1;
+                if line.2 > 0.0 && a.0 < w_w && a.1 < w_h && b.0 < w_w && b.1 < w_h {
+                    w.wu_line(a.0 as i32, a.1 as i32, b.0 as i32, b.1 as i32, line.3);
                 }
             }
 
-            let center = (w.width() as i32/2, w.height() as i32/2);
+            let center = ((w_w/2.0) as i32, (w_h/2.0) as i32);
             w.line(center.0 - 5, center.1, center.0 + 5, center.1, Color::rgb(0xFF, 0xFF, 0xFF));
             w.line(center.0, center.1 - 5, center.0, center.1 + 5, Color::rgb(0xFF, 0xFF, 0xFF));
 

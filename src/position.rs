@@ -28,6 +28,11 @@ impl<'r, R: Reference> Position<'r, R> {
         }
     }
 
+    /// Duplicate this position
+    pub fn duplicate(&self) -> Self {
+        Self::new(self.reference, self.x, self.y, self.z)
+    }
+
     pub fn vector(&'r self, to: &Self) -> Vector<'r, R> {
         let x = to.x - self.x;
         let y = to.y - self.y;

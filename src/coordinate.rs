@@ -113,7 +113,7 @@ impl<'r, R: Spheroid> Coordinate<'r, R> {
     /// Convert to Position
     ///
     /// Adapted from https://en.wikipedia.org/wiki/Geographic_coordinate_conversion#From_geodetic_to_ECEF_coordinates
-    pub fn position(&self) -> Position<R> {
+    pub fn position(&self) -> Position<'r, R> {
         let a = self.reference.radius_equatorial();
         let b = self.reference.radius_polar();
         let f = self.latitude.to_radians();
