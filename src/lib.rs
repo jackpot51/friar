@@ -7,4 +7,6 @@ pub mod position;
 pub mod reference;
 pub mod screen;
 pub mod spheroid;
+pub mod vector;
 pub mod viewport;
+pub mod unit;

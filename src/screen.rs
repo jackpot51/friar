@@ -1,6 +1,3 @@
-//((x + 0.5) * 800.0, (y + 0.5) * 600.0, z * 4800.0);
-
-use perspective::Perspective;
 use position::Position;
 use reference::Reference;
 use viewport::Viewport;
@@ -29,8 +26,8 @@ impl<'r, R: Reference> Screen<'r, R> {
     pub fn transform(&self, point: &Position<'r, R>) -> (f64, f64, f64) {
         let (bx, by, bz) = self.viewport.transform(point);
 
-        let sx = (bx + 0.5) * self.x;
-        let sy = (by + 0.5) * self.y;
+        let sx = (bx + 1.0)/2.0 * self.x;
+        let sy = (by + 1.0)/2.0 * self.y;
         let sz = bz * self.z;
         (sx, sy, sz)
     }

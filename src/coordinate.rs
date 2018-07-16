@@ -1,4 +1,4 @@
-use std::f64;
+use std::{f64, fmt};
 
 use position::Position;
 use spheroid::Spheroid;
@@ -8,6 +8,12 @@ pub struct Coordinate<'r, R: Spheroid + 'r> {
     pub latitude: f64,
     pub longitude: f64,
     pub elevation: f64,
+}
+
+impl<'r, R: Spheroid> fmt::Display for Coordinate<'r, R> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "({}, {}, {})", self.latitude, self.longitude, self.elevation)
+    }
 }
 
 impl<'r, R: Spheroid> Coordinate<'r, R> {
@@ -44,7 +50,7 @@ impl<'r, R: Spheroid> Coordinate<'r, R> {
     /// Great-circle distance to another Coordinate in meters, using average radius at the two latitudes
     ///
     /// Adapted from https://en.wikipedia.org/wiki/Great-circle_distance#Computational_formulas
-    pub fn distance(&self, to: Self) -> f64 {
+    pub fn distance(&self, to: &Self) -> f64 {
         let f1 = self.latitude.to_radians();
         let l1 = self.longitude.to_radians();
         let f2 = to.latitude.to_radians();
@@ -60,10 +66,10 @@ impl<'r, R: Spheroid> Coordinate<'r, R> {
         th*r
     }
 
-    /// Great-circle course to another Coordinate in degrees
+    /// Great-circle heading to another Coordinate in degrees
     ///
     /// Adapted from https://en.wikipedia.org/wiki/Great-circle_navigation#Course
-    pub fn course(&self, to: Self) -> f64 {
+    pub fn heading(&self, to: &Self) -> f64 {
         let f1 = self.latitude.to_radians();
         let l1 = self.longitude.to_radians();
         let f2 = to.latitude.to_radians();
@@ -126,24 +132,15 @@ impl<'r, R: Spheroid> Coordinate<'r, R> {
         Position::new(self.reference, x, y, z)
     }
 
-    /// Get rotation numbers in ECEF
-    //TODO: Use ry, rz
-    pub fn rotation(&self, rx: f64, ry: f64, rz: f64) -> (f64, f64, f64) {
+    /// Get rotation of ground plane in ECEF
+    pub fn rotation(&self) -> (f64, f64, f64) {
         let f = self.latitude.to_radians();
         let l = self.longitude.to_radians();
 
-        let rxr = rx.to_radians();
-        let ryr = ry.to_radians();
-        let rzr = rz.to_radians();
+        let rx = 0.0f64;
+        let ry = (f + f64::consts::PI/2.0).mod_euc(2.0 * f64::consts::PI);
+        let rz = (l + f64::consts::PI).mod_euc(2.0 * f64::consts::PI);
 
-        let rxc = 0.0;
-        let ryc = (f + f64::consts::PI/2.0).mod_euc(2.0 * f64::consts::PI);
-        let rzc = (l + f64::consts::PI).mod_euc(2.0 * f64::consts::PI);
-
-        let rxe = rxc + rxr;
-        let rye = ryc;
-        let rze = rzc;
-
-        (rxe.to_degrees(), rye.to_degrees(), rze.to_degrees())
+        (rx.to_degrees(), ry.to_degrees(), rz.to_degrees())
     }
 }
