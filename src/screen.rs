@@ -1,5 +1,3 @@
-use std::cmp;
-
 use position::Position;
 use reference::Reference;
 use viewport::Viewport;
