@@ -154,8 +154,8 @@ fn main() {
     let earth = Earth;
 
     let red = earth.coordinate(39.73922277, -104.9888542, 1597.0);
-    let orange = earth.coordinate(39.73922277, -104.9888542, 1567.0);
-    let yellow = earth.coordinate(39.73922277, -104.9888542, 1537.0);
+    let orange = earth.coordinate(39.739949, -104.988843, 1597.0);
+    let yellow = earth.coordinate(39.738573, -104.988848 , 1597.0);
     let green = earth.coordinate(39.73923927, -104.98668697, 1600.0);
     let blue = earth.coordinate(39.73926402, -104.9847987, 1608.0);
 
@@ -167,7 +167,7 @@ fn main() {
         (blue.position(), Color::rgb(0x00, 0x00, 0xFF), "blue".to_string()),
     ];
 
-    let origin = earth.coordinate(39.73924752, -104.99111798, 1597.0);
+    let origin = earth.coordinate(39.73922277, -104.99111798, 1597.0);
     let mut viewer = origin.duplicate();
 
     let mut redraw = true;
@@ -183,7 +183,7 @@ fn main() {
             let perspective_rot = (90.0 - calculated_rot.1, -calculated_rot.0, 90.0 + calculated_rot.2);
             let perspective = viewer_pos.perspective(perspective_rot.0, perspective_rot.1, perspective_rot.2);
             let viewport = perspective.viewport(0.0, 0.0, 1.0);
-            let screen = viewport.screen(w.width() as f64, w.height() as f64, 4800.0);
+            let screen = viewport.screen(w.width() as f64, w.height() as f64, 3600.0);
 
             println!("rotation: {}, {}, {}", heading, pitch, roll);
             println!("viewer: {}", viewer);
