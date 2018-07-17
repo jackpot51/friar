@@ -69,8 +69,10 @@ fn paths<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, 
     };
 
     let parse_height = |s: &String| -> f64 {
-        match s.replace(" m", "").parse::<f64>() {
-            Ok(height) => {
+        match s.replace("'", "").replace(" m", "").parse::<f64>() {
+            Ok(height) => if s.ends_with("'") {
+                height * 3.28084
+            } else {
                 height
             },
             Err(err) => {
@@ -389,28 +391,40 @@ fn main() {
             w.line(center.0 - 5, center.1, center.0 + 5, center.1, Color::rgb(0xFF, 0xFF, 0xFF));
             w.line(center.0, center.1 - 5, center.0, center.1 + 5, Color::rgb(0xFF, 0xFF, 0xFF));
 
-            let _ = write!(
-                WindowWriter::new(&mut w, 0, 0, Color::rgb(0xFF, 0xFF, 0xFF)),
-                "FPS: {}",
-                1.0/time
-            );
+            let mut y = 0;
 
             let _ = write!(
-                WindowWriter::new(&mut w, 0, 16, Color::rgb(0xFF, 0xFF, 0xFF)),
+                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
                 "Coord: {}",
                 viewer
             );
+            y += 16;
 
             let _ = write!(
-                WindowWriter::new(&mut w, 0, 32, Color::rgb(0xFF, 0xFF, 0xFF)),
+                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
                 "Pos: {}",
                 viewer_pos
             );
+            y += 16;
 
             let _ = write!(
-                WindowWriter::new(&mut w, 0, 48, Color::rgb(0xFF, 0xFF, 0xFF)),
+                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
                 "Rot: {}, {}, {}",
                 heading, pitch, roll
+            );
+            y += 16;
+
+            let _ = write!(
+                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                "Lines: {}",
+                lines.len()
+            );
+            y += 16;
+
+            let _ = write!(
+                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                "FPS: {}",
+                1.0/time
             );
 
             w.sync();
