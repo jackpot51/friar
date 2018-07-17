@@ -13,11 +13,11 @@ use friar::spheroid::Spheroid;
 use orbclient::{Color, EventOption, Renderer, Window, WindowFlag};
 use osmpbfreader::{OsmPbfReader, OsmObj, Node, NodeId, Way, WayId};
 use rayon::prelude::*;
-use std::{cmp, mem};
+use std::{cmp, mem, thread};
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use std::fs::File;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy)]
 struct Point {
@@ -345,8 +345,7 @@ fn main() {
     println!("OSM: {},{},{},{}", km_sw.longitude, km_sw.latitude, km_ne.longitude, km_ne.latitude);
 
     let triangles_earth = osm(
-        "/home/jeremy/Downloads/Denver.osm.pbf",
-        //"res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf",
+        "res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf",
         &earth,
         (
             km_sw.latitude, km_sw.longitude,
@@ -521,7 +520,7 @@ fn main() {
             redraw = true;
         }
 
-        if true {
+        if redraw {
             if redraw_times > 0 {
                 redraw_times -= 1;
             } else {
@@ -648,6 +647,8 @@ fn main() {
             );
 
             w.sync();
+        } else {
+            thread::sleep(Duration::new(0, 1000000000/60));
         }
     }
 }
