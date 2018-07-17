@@ -154,7 +154,7 @@ impl<'a> fmt::Write for WindowWriter<'a> {
     }
 }
 
-fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f64), ground: f64) -> Vec<(Position<'r, R>, Position<'r, R>, Position<'r, R>)> {
+fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f64), ground: f64) -> Vec<(Position<'r, R>, Position<'r, R>, Position<'r, R>, (u8, u8, u8))> {
     let mut nodes: HashMap<NodeId, Node> = HashMap::new();
     let mut ways: HashMap<WayId, Way> = HashMap::new();
 
@@ -191,6 +191,21 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
         }
     };
 
+    let parse_color = |s: &String| -> u32 {
+        if s.starts_with('#') {
+            match u32::from_str_radix(&s[1..], 16) {
+                Ok(color) => color,
+                Err(err) => {
+                    println!("Failed to parse color {}: {}", s, err);
+                    0xFFFFFF
+                }
+            }
+        } else {
+            println!("Failed to parse color {}: Unknown format", s);
+            0xFFFFFF
+        }
+    };
+
     let mut triangles = Vec::with_capacity(ways.len());
     for (_id, way) in ways.iter() {
         // println!("{:?}", way);
@@ -202,6 +217,16 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
         let height_opt = way.tags.get("height")
             .or(way.tags.get("building:height"))
             .map(parse_height);
+
+        let color = way.tags.get("building:colour")
+            .map(parse_color)
+            .unwrap_or(0xFFFFFF);
+
+        let rgb = (
+            (color >> 16) as u8,
+            (color >> 8) as u8,
+            color as u8
+        );
 
         let mut last_coordinate_opt = None;
         for node_id in way.nodes.iter() {
@@ -222,13 +247,15 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
                         triangles.push((
                             last_coord_max.position(),
                             last_coord_min.position(),
-                            coord_min.position()
+                            coord_min.position(),
+                            rgb
                         ));
 
                         triangles.push((
                             coord_max.position(),
                             coord_min.position(),
                             last_coord_max.position(),
+                            rgb
                         ));
                     }
                 }
@@ -498,15 +525,18 @@ fn main() {
                         y: c_screen.1 as i32,
                     };
 
-                    let z = (a_screen.2 + b_screen.2 + c_screen.2)/3.0;
+                    let z = a_screen.2.min(b_screen.2).min(c_screen.2);
 
-                    let value = (z.log2() * 32.0).max(32.0).min(255.0) as u8;
+                    let value = (z.log2() * 0.125).max(0.125).min(1.0);
+                    let cr = (((triangle.3).0 as f64) * value) as u8;
+                    let cg = (((triangle.3).1 as f64) * value) as u8;
+                    let cb = (((triangle.3).2 as f64) * value) as u8;
 
-                    Some((z, Triangle::new(a, b, c), Color::rgb(value, value, value)))
+                    Some((z, Triangle::new(a, b, c), Color::rgb(cr, cg, cb)))
                 })
             );
 
-            triangles.par_sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            triangles.par_sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
             w.set(Color::rgb(0, 0, 0));
 
