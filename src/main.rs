@@ -71,102 +71,7 @@ impl Triangle {
         r.wu_line(b.x, b.y, c.x, c.y, color);
     }
 
-    fn fill_a<R: Renderer>(&self, r: &mut R, color: Color) {
-        use orbclient::renderer::fast_set32;
-
-        let a = self.a;
-        let b = self.b;
-        let c = self.c;
-        let d = color.data | 0xFF000000;
-
-        if a.y == b.y && a.y == c.y {
-            return;
-        }
-
-        let w = r.width() as i32;
-        let h = r.height() as i32;
-
-        /*
-        let valid = |p: &Point| {
-            p.x >= 0 && p.x < w && p.y >= 0 && p.y < h
-        };
-
-        if ! valid(&a) || ! valid(&b) || ! valid(&c) {
-            return;
-        }
-        */
-
-        let dx1 = if b.y - a.y > 0 {
-            ((b.x - a.x) as f32)/((b.y - a.y) as f32)
-        } else {
-            0.0
-        };
-
-        let dx2 =  if c.y - a.y > 0 {
-            ((c.x - a.x) as f32)/((c.y - a.y) as f32)
-        } else {
-            0.0
-        };
-
-        let dx3 = if c.y - b.y > 0 {
-            ((c.x - b.x) as f32)/((c.y - b.y) as f32)
-        } else {
-            0.0
-        };
-
-        //println!("{}, {}, {}", dx1, dx2, dx3);
-
-        let data = r.data_mut();
-        let data_ptr = data.as_mut_ptr() as *mut u32;
-        let horizline = |x1f: f32, x2f: f32, y: i32| {
-            let x1 = cmp::max(x1f.round() as i32, 0);
-            let x2 = cmp::min(x2f.round() as i32, w - 1);
-
-            if x1 < x2 && y >= 0 && y < h {
-                let offset = y * w + x1;
-                let len = x2 + 1 - x1;
-                unsafe {
-                    fast_set32(data_ptr.offset(offset as isize), d, len as usize);
-                }
-            }
-        };
-
-        let mut sx = a.x as f32;
-        let mut ex = a.x as f32;
-        let mut sy = a.y;
-        if dx1 > dx2 {
-            while sy <= b.y {
-                horizline(sx, ex, sy);
-                sy += 1;
-                sx += dx2;
-                ex += dx1;
-            }
-            ex = b.x as f32;
-            while sy <= c.y {
-                horizline(sx, ex, sy);
-                sy += 1;
-                sx += dx2;
-                ex += dx3;
-            }
-        } else {
-            while sy <= b.y {
-                horizline(sx, ex, sy);
-                sy += 1;
-                sx += dx1;
-                ex += dx2;
-            }
-            sx = b.x as f32;
-            sy = b.y;
-            while sy <= c.y {
-                horizline(sx, ex, sy);
-                sy += 1;
-                sx += dx3;
-                ex += dx2;
-            }
-        }
-    }
-
-    fn fill_b<R: Renderer>(&self, r: &mut R, color: Color) {
+    fn fill<R: Renderer>(&self, r: &mut R, color: Color) {
         use orbclient::renderer::fast_set32;
 
         let t0 = self.a;
@@ -187,26 +92,31 @@ impl Triangle {
         let total_height = t2.y-t0.y;
         let mut i = 0;
         while i<total_height {
-            let second_half = i>t1.y-t0.y || t1.y==t0.y;
-            let segment_height = if second_half { t2.y-t1.y } else { t1.y-t0.y };
-
-            let alpha = (i as f32)/(total_height as f32);
-            let beta  = ((i-(if second_half { t1.y-t0.y } else { 0 })) as f32)/(segment_height as f32); // be careful: with above conditions no division by zero here
-
-            let ax = t0.x + (((t2.x-t0.x) as f32)*alpha) as i32;
-            let bx = if second_half { t1.x + (((t2.x-t1.x) as f32)*beta) as i32 } else { t0.x + (((t1.x-t0.x) as f32)*beta) as i32 };
-
-            let (minx, maxx) = if ax > bx { (bx, ax) } else { (ax, bx) };
-            let x1 = cmp::max(minx, 0);
-            let x2 = cmp::min(maxx, w - 1);
             let y = t0.y + i;
 
-            if x1 < x2 && y >= 0 && y < h {
-                let offset = y * w + x1;
-                let len = x2 + 1 - x1;
-                //println!("{}, {}", offset, len);
-                unsafe {
-                    fast_set32(data_ptr.offset(offset as isize), d, len as usize);
+            if y >= h {
+                break;
+            } else if y >= 0 {
+                let second_half = i>t1.y-t0.y || t1.y==t0.y;
+                let segment_height = if second_half { t2.y-t1.y } else { t1.y-t0.y };
+
+                let alpha = (i as f32)/(total_height as f32);
+                let beta  = ((i-(if second_half { t1.y-t0.y } else { 0 })) as f32)/(segment_height as f32); // be careful: with above conditions no division by zero here
+
+                let ax = t0.x + (((t2.x-t0.x) as f32)*alpha) as i32;
+                let bx = if second_half { t1.x + (((t2.x-t1.x) as f32)*beta) as i32 } else { t0.x + (((t1.x-t0.x) as f32)*beta) as i32 };
+
+                let (minx, maxx) = if ax > bx { (bx, ax) } else { (ax, bx) };
+                let x1 = cmp::max(minx, 0);
+                let x2 = cmp::min(maxx, w - 1);
+
+                if x1 < x2 && y >= 0 && y < h {
+                    let offset = y * w + x1;
+                    let len = x2 + 1 - x1;
+                    //println!("{}, {}", offset, len);
+                    unsafe {
+                        fast_set32(data_ptr.offset(offset as isize), d, len as usize);
+                    }
                 }
             }
 
@@ -387,7 +297,7 @@ fn main() {
 
     let mut redraw = true;
     let mut redraw_times = 2;
-    let mut draw_style = 0;
+    let mut fill = true;
     let mut triangles = Vec::with_capacity(triangles_earth.len());
 
     let mut last_instant = Instant::now();
@@ -457,10 +367,7 @@ fn main() {
                         },
 
                         orbclient::K_F if key_event.pressed => {
-                            draw_style += 1;
-                            if draw_style >= 3 {
-                                draw_style = 0;
-                            }
+                            fill = !fill;
                             redraw = true;
                         },
 
@@ -535,7 +442,7 @@ fn main() {
             redraw = true;
         }
 
-        if redraw {
+        if true {
             if redraw_times > 0 {
                 redraw_times -= 1;
             } else {
@@ -603,17 +510,12 @@ fn main() {
 
             w.set(Color::rgb(0, 0, 0));
 
-            match draw_style {
-                0 => for (_z, triangle, color) in triangles.iter() {
-                    triangle.fill_a(&mut w, *color);
-                },
-                1 => for (_z, triangle, color) in triangles.iter() {
-                    triangle.fill_b(&mut w, *color);
-                },
-                2 => for (_z, triangle, color) in triangles.iter() {
+            for (_z, triangle, color) in triangles.iter() {
+                if fill {
+                    triangle.fill(&mut w, *color);
+                } else {
                     triangle.draw(&mut w, *color);
-                },
-                _ => (),
+                }
             }
 
             let center = (w_w/2 as i32, w_h/2 as i32);
@@ -645,15 +547,15 @@ fn main() {
 
             let _ = write!(
                 WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
-                "Triangles: {}",
-                triangles.len()
+                "Triangles (In): {}",
+                triangles_earth.len()
             );
             y += 16;
 
             let _ = write!(
                 WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
-                "Style: {}",
-                draw_style
+                "Triangles (Out): {}",
+                triangles.len()
             );
             y += 16;
 
