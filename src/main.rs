@@ -158,6 +158,11 @@ fn main() {
     let km_sw = origin.offset(1000.0, 225.0, 0.0);
     let km_ne = origin.offset(1000.0, 45.0, 0.0);
 
+    println!("Origin: {}", origin);
+    println!("SW: {}", km_sw);
+    println!("NE: {}", km_ne);
+    println!("OSM: {},{},{},{}", km_sw.longitude, km_sw.latitude, km_ne.longitude, km_ne.latitude);
+
     let paths = paths(
         "res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf",
         &earth,
@@ -251,8 +256,8 @@ fn main() {
                             roll_right = key_event.pressed;
                         },
                         orbclient::K_P if key_event.pressed => {
-                            heading = 90.0;
-                            pitch = 0.0;
+                            heading = 0.0;
+                            pitch = 270.0;
                             roll = 0.0;
                             redraw = true;
                         },
