@@ -11,10 +11,207 @@ use friar::reference::Reference;
 use friar::spheroid::Spheroid;
 use orbclient::{Color, EventOption, Renderer, Window, WindowFlag};
 use osmpbfreader::{OsmPbfReader, OsmObj, Node, NodeId, Way, WayId};
+use std::{cmp, mem};
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use std::fs::File;
 use std::time::Instant;
+
+#[derive(Clone, Copy)]
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+struct Triangle {
+    a: Point,
+    b: Point,
+    c: Point,
+}
+
+impl Triangle {
+    fn new(mut a: Point, mut b: Point, mut c: Point) -> Self {
+        if a.y > b.y {
+            mem::swap(&mut a, &mut b);
+        }
+        if a.y > c.y {
+            mem::swap(&mut a, &mut c);
+        }
+        if b.y > c.y {
+            mem::swap(&mut b, &mut c);
+        }
+
+        Self {
+            a,
+            b,
+            c
+        }
+    }
+
+    fn draw<R: Renderer>(&self, r: &mut R, color: Color) {
+        let a = self.a;
+        let b = self.b;
+        let c = self.c;
+
+        let w = r.width() as i32;
+        let h = r.height() as i32;
+
+        let valid = |p: &Point| {
+            p.x >= 0 && p.x < w && p.y >= 0 && p.y < h
+        };
+
+        if ! valid(&a) || ! valid(&b) || ! valid(&c) {
+            return;
+        }
+
+        r.wu_line(a.x, a.y, b.x, b.y, color);
+        r.wu_line(a.x, a.y, c.x, c.y, color);
+        r.wu_line(b.x, b.y, c.x, c.y, color);
+    }
+
+    fn fill_a<R: Renderer>(&self, r: &mut R, color: Color) {
+        use orbclient::renderer::fast_set32;
+
+        let a = self.a;
+        let b = self.b;
+        let c = self.c;
+        let d = color.data | 0xFF000000;
+
+        if a.y == b.y && a.y == c.y {
+            return;
+        }
+
+        let w = r.width() as i32;
+        let h = r.height() as i32;
+
+        /*
+        let valid = |p: &Point| {
+            p.x >= 0 && p.x < w && p.y >= 0 && p.y < h
+        };
+
+        if ! valid(&a) || ! valid(&b) || ! valid(&c) {
+            return;
+        }
+        */
+
+        let dx1 = if b.y - a.y > 0 {
+            ((b.x - a.x) as f32)/((b.y - a.y) as f32)
+        } else {
+            0.0
+        };
+
+        let dx2 =  if c.y - a.y > 0 {
+            ((c.x - a.x) as f32)/((c.y - a.y) as f32)
+        } else {
+            0.0
+        };
+
+        let dx3 = if c.y - b.y > 0 {
+            ((c.x - b.x) as f32)/((c.y - b.y) as f32)
+        } else {
+            0.0
+        };
+
+        //println!("{}, {}, {}", dx1, dx2, dx3);
+
+        let data = r.data_mut();
+        let data_ptr = data.as_mut_ptr() as *mut u32;
+        let horizline = |x1f: f32, x2f: f32, y: i32| {
+            let x1 = cmp::max(x1f.round() as i32, 0);
+            let x2 = cmp::min(x2f.round() as i32, w - 1);
+
+            if x1 < x2 && y >= 0 && y < h {
+                let offset = y * w + x1;
+                let len = x2 + 1 - x1;
+                unsafe {
+                    fast_set32(data_ptr.offset(offset as isize), d, len as usize);
+                }
+            }
+        };
+
+        let mut sx = a.x as f32;
+        let mut ex = a.x as f32;
+        let mut sy = a.y;
+        if dx1 > dx2 {
+            while sy <= b.y {
+                horizline(sx, ex, sy);
+                sy += 1;
+                sx += dx2;
+                ex += dx1;
+            }
+            ex = b.x as f32;
+            while sy <= c.y {
+                horizline(sx, ex, sy);
+                sy += 1;
+                sx += dx2;
+                ex += dx3;
+            }
+        } else {
+            while sy <= b.y {
+                horizline(sx, ex, sy);
+                sy += 1;
+                sx += dx1;
+                ex += dx2;
+            }
+            sx = b.x as f32;
+            sy = b.y;
+            while sy <= c.y {
+                horizline(sx, ex, sy);
+                sy += 1;
+                sx += dx3;
+                ex += dx2;
+            }
+        }
+    }
+
+    fn fill_b<R: Renderer>(&self, r: &mut R, color: Color) {
+        use orbclient::renderer::fast_set32;
+
+        let t0 = self.a;
+        let t1 = self.b;
+        let t2 = self.c;
+        let d = color.data | 0xFF000000;
+
+        if t0.y == t1.y && t0.y == t2.y {
+            return;
+        }
+
+        let w = r.width() as i32;
+        let h = r.height() as i32;
+
+        let data = r.data_mut();
+        let data_ptr = data.as_mut_ptr() as *mut u32;
+
+        let total_height = t2.y-t0.y;
+        let mut i = 0;
+        while i<total_height {
+            let second_half = i>t1.y-t0.y || t1.y==t0.y;
+            let segment_height = if second_half { t2.y-t1.y } else { t1.y-t0.y };
+
+            let alpha = (i as f32)/(total_height as f32);
+            let beta  = ((i-(if second_half { t1.y-t0.y } else { 0 })) as f32)/(segment_height as f32); // be careful: with above conditions no division by zero here
+
+            let ax = t0.x + (((t2.x-t0.x) as f32)*alpha) as i32;
+            let bx = if second_half { t1.x + (((t2.x-t1.x) as f32)*beta) as i32 } else { t0.x + (((t1.x-t0.x) as f32)*beta) as i32 };
+
+            let (minx, maxx) = if ax > bx { (bx, ax) } else { (ax, bx) };
+            let x1 = cmp::max(minx, 0);
+            let x2 = cmp::min(maxx, w - 1);
+            let y = t0.y + i;
+
+            if x1 < x2 && y >= 0 && y < h {
+                let offset = y * w + x1;
+                let len = x2 + 1 - x1;
+                //println!("{}, {}", offset, len);
+                unsafe {
+                    fast_set32(data_ptr.offset(offset as isize), d, len as usize);
+                }
+            }
+
+            i += 1;
+        }
+    }
+}
 
 struct WindowWriter<'a> {
     window: &'a mut Window,
@@ -45,7 +242,7 @@ impl<'a> fmt::Write for WindowWriter<'a> {
     }
 }
 
-fn paths<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f64), ground: f64) -> Vec<(Position<'r, R>, Position<'r, R>)> {
+fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f64), ground: f64) -> Vec<(Position<'r, R>, Position<'r, R>, Position<'r, R>)> {
     let mut nodes: HashMap<NodeId, Node> = HashMap::new();
     let mut ways: HashMap<WayId, Way> = HashMap::new();
 
@@ -82,7 +279,7 @@ fn paths<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, 
         }
     };
 
-    let mut paths = Vec::with_capacity(ways.len());
+    let mut triangles = Vec::with_capacity(ways.len());
     for (_id, way) in ways.iter() {
         // println!("{:?}", way);
 
@@ -106,26 +303,20 @@ fn paths<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, 
                     let last_coord_min = last_coordinate.offset(min_height, 0.0, 90.0);
                     let coord_min = coordinate.offset(min_height, 0.0, 90.0);
 
-                    paths.push((
-                        last_coord_min.position(),
-                        coord_min.position()
-                    ));
-
                     if let Some(height) = height_opt {
                         let last_coord_max = last_coordinate.offset(height, 0.0, 90.0);
                         let coord_max = coordinate.offset(height, 0.0, 90.0);
 
-                        paths.push((
+                        triangles.push((
                             last_coord_max.position(),
-                            coord_max.position()
-                        ));
-                        paths.push((
                             last_coord_min.position(),
-                            last_coord_max.position()
+                            coord_min.position()
                         ));
-                        paths.push((
+
+                        triangles.push((
+                            coord_max.position(),
                             coord_min.position(),
-                            coord_max.position()
+                            last_coord_max.position(),
                         ));
                     }
                 }
@@ -135,7 +326,7 @@ fn paths<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, 
         }
     }
 
-    paths
+    triangles
 }
 
 fn main() {
@@ -163,7 +354,7 @@ fn main() {
     println!("NE: {}", km_ne);
     println!("OSM: {},{},{},{}", km_sw.longitude, km_sw.latitude, km_ne.longitude, km_ne.latitude);
 
-    let paths = paths(
+    let triangles_earth = osm(
         "res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf",
         &earth,
         (
@@ -194,7 +385,8 @@ fn main() {
 
     let mut redraw = true;
     let mut redraw_times = 2;
-    let mut lines = Vec::with_capacity(paths.len());
+    let mut draw_style = 0;
+    let mut triangles = Vec::with_capacity(triangles_earth.len());
 
     let mut last_instant = Instant::now();
     loop {
@@ -259,6 +451,14 @@ fn main() {
                             heading = 0.0;
                             pitch = 270.0;
                             roll = 0.0;
+                            redraw = true;
+                        },
+
+                        orbclient::K_F if key_event.pressed => {
+                            draw_style += 1;
+                            if draw_style >= 3 {
+                                draw_style = 0;
+                            }
                             redraw = true;
                         },
 
@@ -353,43 +553,64 @@ fn main() {
             let w_h = w.height() as i32;
             let screen = viewport.screen(w_w as f64, w_h as f64, 3600.0);
 
-            lines.clear();
+            triangles.clear();
 
-            for path in paths.iter() {
-                let a_ground = ground_perspective.transform(&path.0);
+            for triangle in triangles_earth.iter() {
+                let a_ground = ground_perspective.transform(&triangle.0);
                 let a_screen = screen.transform(&a_ground);
-                let b_ground = ground_perspective.transform(&path.1);
+                if a_screen.2 < 0.0 {
+                    continue;
+                }
+
+                let b_ground = ground_perspective.transform(&triangle.1);
                 let b_screen = screen.transform(&b_ground);
-                lines.push((a_screen, b_screen, (a_screen.2 + b_screen.2)/2.0, Color::rgb(0xFF, 0xFF, 0xFF)));
+                if b_screen.2 < 0.0 {
+                    continue;
+                }
+
+                let c_ground = ground_perspective.transform(&triangle.2);
+                let c_screen = screen.transform(&c_ground);
+                if c_screen.2 < 0.0 {
+                    continue;
+                }
+
+                let a = Point {
+                    x: a_screen.0 as i32,
+                    y: a_screen.1 as i32,
+                };
+
+                let b = Point {
+                    x: b_screen.0 as i32,
+                    y: b_screen.1 as i32,
+                };
+
+                let c = Point {
+                    x: c_screen.0 as i32,
+                    y: c_screen.1 as i32,
+                };
+
+                let z = (a_screen.2 + b_screen.2 + c_screen.2)/3.0;
+
+                let value = (z.log2() * 32.0).max(32.0).min(255.0) as u8;
+
+                triangles.push((z, Triangle::new(a, b, c), Color::rgb(value, value, value)));
             }
 
-            lines.sort_unstable_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+            triangles.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
             w.set(Color::rgb(0, 0, 0));
 
-            for line in lines.iter() {
-                if line.2 > 0.0 {
-                    let a = line.0;
-                    let ax = a.0.round() as i32;
-                    let ay = a.1.round() as i32;
-
-                    let b = line.1;
-                    let bx = b.0.round() as i32;
-                    let by = b.1.round() as i32;
-
-                    if
-                        ax >= 0 &&
-                        ax < w_w &&
-                        ay >= 0 &&
-                        ay < w_h &&
-                        bx >= 0 &&
-                        bx < w_w &&
-                        by >= 0 &&
-                        by < w_h
-                    {
-                        w.wu_line(ax, ay, bx, by, line.3);
-                    }
-                }
+            match draw_style {
+                0 => for (_z, triangle, color) in triangles.iter() {
+                    triangle.fill_a(&mut w, *color);
+                },
+                1 => for (_z, triangle, color) in triangles.iter() {
+                    triangle.fill_b(&mut w, *color);
+                },
+                2 => for (_z, triangle, color) in triangles.iter() {
+                    triangle.draw(&mut w, *color);
+                },
+                _ => (),
             }
 
             let center = (w_w/2 as i32, w_h/2 as i32);
@@ -421,8 +642,15 @@ fn main() {
 
             let _ = write!(
                 WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
-                "Lines: {}",
-                lines.len()
+                "Triangles: {}",
+                triangles.len()
+            );
+            y += 16;
+
+            let _ = write!(
+                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                "Style: {}",
+                draw_style
             );
             y += 16;
 
