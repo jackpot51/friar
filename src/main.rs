@@ -192,17 +192,44 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
     };
 
     let parse_color = |s: &String| -> u32 {
-        if s.starts_with('#') {
-            match u32::from_str_radix(&s[1..], 16) {
-                Ok(color) => color,
-                Err(err) => {
-                    println!("Failed to parse color {}: {}", s, err);
-                    0xFFFFFF
+        match s.as_str() {
+            "black" => 0x404040, //0x000000,
+            "white" => 0xFFFFFF,
+            "gray" | "grey" => 0x808080,
+            "silver" => 0xC0C0C0,
+            "maroon" => 0x800000,
+            "red" =>  0xFF0000,
+            "olive" => 0x808000,
+            "yellow" => 0xFFFF00,
+            "green" => 0x008000,
+            "lime" => 0x00FF00,
+            "teal" => 0x008080,
+            "aqua" | "cyan" => 0x00FFFF,
+            "navy" => 0x000080,
+            "blue" => 0x0000FF,
+            "purple" => 0x800080,
+            "fuchsia" | "magenta" => 0xFF00FF,
+
+            "brown" => 0xA52A2A,
+            "darkgray" | "darkgrey" | "dark_gray" | "dark_grey" => 0xA9A9A9,
+            "saddlebrown" => 0x8B4513,
+            "sandybrown" => 0xF4A460,
+            "sienna" => 0xA0522D,
+            "tan" => 0xD2B48C,
+            _ => {
+                let s_trim = if s.starts_with('#') {
+                    &s[1..]
+                } else {
+                    s
+                };
+                match u32::from_str_radix(&s_trim, 16) {
+                    Ok(color) => color,
+                    Err(err) => {
+                        println!("Failed to parse color {}: {}", s, err);
+                        0xFFFFFF
+                    }
                 }
             }
-        } else {
-            println!("Failed to parse color {}: Unknown format", s);
-            0xFFFFFF
         }
     };
 
@@ -219,6 +246,7 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
             .map(parse_height);
 
         let color = way.tags.get("building:colour")
+            .or(way.tags.get("building:color"))
             .map(parse_color)
             .unwrap_or(0xFFFFFF);
 
@@ -237,12 +265,35 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
 
             if let Some(last_coordinate) = last_coordinate_opt.take() {
                 if in_bounds(&coordinate) && in_bounds(&last_coordinate) {
-                    let last_coord_min = last_coordinate.offset(min_height, 0.0, 90.0);
-                    let coord_min = coordinate.offset(min_height, 0.0, 90.0);
-
                     if let Some(height) = height_opt {
+                        let last_coord_min = last_coordinate.offset(min_height, 0.0, 90.0);
+                        let coord_min = coordinate.offset(min_height, 0.0, 90.0);
+
                         let last_coord_max = last_coordinate.offset(height, 0.0, 90.0);
                         let coord_max = coordinate.offset(height, 0.0, 90.0);
+
+                        triangles.push((
+                            last_coord_max.position(),
+                            last_coord_min.position(),
+                            coord_min.position(),
+                            rgb
+                        ));
+
+                        triangles.push((
+                            coord_max.position(),
+                            coord_min.position(),
+                            last_coord_max.position(),
+                            rgb
+                        ));
+                    } else {
+                        let thickness = 0.25;
+                        let heading = last_coordinate.heading(&coordinate);
+
+                        let last_coord_min = last_coordinate.offset(thickness, 270.0 + heading, 0.0);
+                        let coord_min = coordinate.offset(thickness, 270.0 + heading, 0.0);
+
+                        let last_coord_max = last_coordinate.offset(thickness, 90.0 + heading, 0.0);
+                        let coord_max = coordinate.offset(thickness, 90.0 + heading, 0.0);
 
                         triangles.push((
                             last_coord_max.position(),
@@ -294,7 +345,8 @@ fn main() {
     println!("OSM: {},{},{},{}", km_sw.longitude, km_sw.latitude, km_ne.longitude, km_ne.latitude);
 
     let triangles_earth = osm(
-        "res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf",
+        "/home/jeremy/Downloads/Denver.osm.pbf",
+        //"res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf",
         &earth,
         (
             km_sw.latitude, km_sw.longitude,
