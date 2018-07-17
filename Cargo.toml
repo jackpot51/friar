@@ -6,3 +6,4 @@ authors = ["Jeremy Soller <jackpot51@gmail.com>"]
 [dependencies]
 orbclient = "0.3.16"
 osmpbfreader = "0.12.0"
+rayon = "1.0.2"

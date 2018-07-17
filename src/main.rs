@@ -3,6 +3,7 @@
 extern crate friar;
 extern crate orbclient;
 extern crate osmpbfreader;
+extern crate rayon;
 
 use friar::coordinate::Coordinate;
 use friar::earth::Earth;
@@ -11,6 +12,7 @@ use friar::reference::Reference;
 use friar::spheroid::Spheroid;
 use orbclient::{Color, EventOption, Renderer, Window, WindowFlag};
 use osmpbfreader::{OsmPbfReader, OsmObj, Node, NodeId, Way, WayId};
+use rayon::prelude::*;
 use std::{cmp, mem};
 use std::collections::HashMap;
 use std::fmt::{self, Write};
@@ -554,49 +556,50 @@ fn main() {
             let screen = viewport.screen(w_w as f64, w_h as f64, 3600.0);
 
             triangles.clear();
+            triangles.par_extend(
+                triangles_earth.par_iter().filter_map(|triangle| {
+                    let a_ground = ground_perspective.transform(&triangle.0);
+                    let a_screen = screen.transform(&a_ground);
+                    if a_screen.2 < 0.0 {
+                        return None;
+                    }
 
-            for triangle in triangles_earth.iter() {
-                let a_ground = ground_perspective.transform(&triangle.0);
-                let a_screen = screen.transform(&a_ground);
-                if a_screen.2 < 0.0 {
-                    continue;
-                }
+                    let b_ground = ground_perspective.transform(&triangle.1);
+                    let b_screen = screen.transform(&b_ground);
+                    if b_screen.2 < 0.0 {
+                        return None;
+                    }
 
-                let b_ground = ground_perspective.transform(&triangle.1);
-                let b_screen = screen.transform(&b_ground);
-                if b_screen.2 < 0.0 {
-                    continue;
-                }
+                    let c_ground = ground_perspective.transform(&triangle.2);
+                    let c_screen = screen.transform(&c_ground);
+                    if c_screen.2 < 0.0 {
+                        return None;
+                    }
 
-                let c_ground = ground_perspective.transform(&triangle.2);
-                let c_screen = screen.transform(&c_ground);
-                if c_screen.2 < 0.0 {
-                    continue;
-                }
+                    let a = Point {
+                        x: a_screen.0 as i32,
+                        y: a_screen.1 as i32,
+                    };
 
-                let a = Point {
-                    x: a_screen.0 as i32,
-                    y: a_screen.1 as i32,
-                };
+                    let b = Point {
+                        x: b_screen.0 as i32,
+                        y: b_screen.1 as i32,
+                    };
 
-                let b = Point {
-                    x: b_screen.0 as i32,
-                    y: b_screen.1 as i32,
-                };
+                    let c = Point {
+                        x: c_screen.0 as i32,
+                        y: c_screen.1 as i32,
+                    };
 
-                let c = Point {
-                    x: c_screen.0 as i32,
-                    y: c_screen.1 as i32,
-                };
+                    let z = (a_screen.2 + b_screen.2 + c_screen.2)/3.0;
 
-                let z = (a_screen.2 + b_screen.2 + c_screen.2)/3.0;
+                    let value = (z.log2() * 32.0).max(32.0).min(255.0) as u8;
 
-                let value = (z.log2() * 32.0).max(32.0).min(255.0) as u8;
+                    Some((z, Triangle::new(a, b, c), Color::rgb(value, value, value)))
+                })
+            );
 
-                triangles.push((z, Triangle::new(a, b, c), Color::rgb(value, value, value)));
-            }
-
-            triangles.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            triangles.par_sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
             w.set(Color::rgb(0, 0, 0));
 
