@@ -170,7 +170,7 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
         }
     }
 
-    let in_bounds = |coordinate: &Coordinate<'r, R>| -> bool {
+    let check_bounds = |coordinate: &Coordinate<'r, R>| -> bool {
         coordinate.latitude > bounds.0 &&
         coordinate.latitude < bounds.2 &&
         coordinate.longitude > bounds.1 &&
@@ -233,9 +233,39 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
         }
     };
 
+    let parse_levels = |s: &String| {
+        match s.parse::<f64>() {
+            Ok(levels) => levels * 3.0,
+            Err(err) => {
+                println!("Failed to parse levels {}: {}", s, err);
+                3.0
+            }
+        }
+    };
+
     let mut triangles = Vec::with_capacity(ways.len());
     for (_id, way) in ways.iter() {
         // println!("{:?}", way);
+
+        let mut in_bounds = false;
+        let mut coords = Vec::with_capacity(way.nodes.len());
+
+        for node_id in way.nodes.iter() {
+            let node = &nodes[node_id];
+            // println!("  {:?}", node);
+
+            let coord = reference.coordinate(node.lat(), node.lon(), ground);
+
+            if check_bounds(&coord) {
+                in_bounds = true;
+            }
+
+            coords.push(coord);
+        }
+
+        if ! in_bounds {
+            continue;
+        }
 
         let min_height = way.tags.get("min_height")
             .map(parse_height)
@@ -244,7 +274,10 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
         let height_opt = way.tags.get("height")
             .or(way.tags.get("building:height"))
             .map(parse_height)
-            .or(way.tags.get("building").map(|_x| 10.0));
+            .or(way.tags.get("building:levels")
+            .map(parse_levels))
+            .or(way.tags.get("building")
+            .map(|_x| 3.0));
 
         let color = way.tags.get("building:colour")
             .or(way.tags.get("building:color"))
@@ -257,83 +290,72 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
             color as u8
         );
 
-        let mut first_coordinate_opt = None;
-        let mut last_coordinate_opt = None;
-        for (i, node_id) in way.nodes.iter().enumerate() {
-            let node = &nodes[node_id];
-            // println!("  {:?}", node);
+        let roof_color = way.tags.get("roof:colour")
+            .or(way.tags.get("roof:color"))
+            .map(parse_color)
+            .unwrap_or(color);
 
-            let coordinate = reference.coordinate(node.lat(), node.lon(), ground);
+        let roof_rgb = (
+            (roof_color >> 16) as u8,
+            (roof_color >> 8) as u8,
+            roof_color as u8
+        );
 
-            if let Some(last_coordinate) = last_coordinate_opt.take() {
-                if in_bounds(&coordinate) && in_bounds(&last_coordinate) {
-                    if let Some(height) = height_opt {
-                        let last_coord_min = last_coordinate.offset(min_height, 0.0, 90.0);
-                        let coord_min = coordinate.offset(min_height, 0.0, 90.0);
+        for i in 1..coords.len() {
+            let last_coord = &coords[i - 1];
+            let coord = &coords[i];
 
-                        let last_coord_max = last_coordinate.offset(height, 0.0, 90.0);
-                        let coord_max = coordinate.offset(height, 0.0, 90.0);
+            let (
+                last_coord_min,
+                coord_min,
+                last_coord_max,
+                coord_max,
+            ) = if let Some(height) = height_opt {
+                (
+                    last_coord.offset(min_height, 0.0, 90.0),
+                    coord.offset(min_height, 0.0, 90.0),
+                    last_coord.offset(height, 0.0, 90.0),
+                    coord.offset(height, 0.0, 90.0),
+                )
+            } else {
+                let thickness = 0.25;
+                let heading = last_coord.heading(&coord);
 
-                        triangles.push((
-                            last_coord_max.position(),
-                            last_coord_min.position(),
-                            coord_min.position(),
-                            rgb
-                        ));
+                (
+                    last_coord.offset(thickness, 270.0 + heading, 0.0),
+                    coord.offset(thickness, 270.0 + heading, 0.0),
+                    last_coord.offset(thickness, 90.0 + heading, 0.0),
+                    coord.offset(thickness, 90.0 + heading, 0.0),
+                )
+            };
 
-                        triangles.push((
-                            coord_max.position(),
-                            coord_min.position(),
-                            last_coord_max.position(),
-                            rgb
-                        ));
+            triangles.push((
+                last_coord_max.position(),
+                last_coord_min.position(),
+                coord_min.position(),
+                rgb
+            ));
 
-                        if i >= 2 {
-                            if let Some(ref first_coordinate) = first_coordinate_opt {
-                                if in_bounds(&first_coordinate) {
-                                    /*TODO: Roofs
-                                    let first_coord_max = first_coordinate.offset(height, 0.0, 90.0);
-                                    triangles.push((
-                                        first_coord_max.position(),
-                                        last_coord_max.position(),
-                                        coord_max.position(),
-                                        rgb //TODO: roof color
-                                    ));
-                                    */
-                                }
-                            }
-                        }
-                    } else {
-                        let thickness = 0.25;
-                        let heading = last_coordinate.heading(&coordinate);
+            triangles.push((
+                coord_max.position(),
+                coord_min.position(),
+                last_coord_max.position(),
+                rgb
+            ));
 
-                        let last_coord_min = last_coordinate.offset(thickness, 270.0 + heading, 0.0);
-                        let coord_min = coordinate.offset(thickness, 270.0 + heading, 0.0);
 
-                        let last_coord_max = last_coordinate.offset(thickness, 90.0 + heading, 0.0);
-                        let coord_max = coordinate.offset(thickness, 90.0 + heading, 0.0);
-
-                        triangles.push((
-                            last_coord_max.position(),
-                            last_coord_min.position(),
-                            coord_min.position(),
-                            rgb
-                        ));
-
-                        triangles.push((
-                            coord_max.position(),
-                            coord_min.position(),
-                            last_coord_max.position(),
-                            rgb
-                        ));
-                    }
+            if i >= 2 {
+                let first_coord = &coords[0];
+                if let Some(height) = height_opt {
+                    let first_coord_max = first_coord.offset(height, 0.0, 90.0);
+                    triangles.push((
+                        first_coord_max.position(),
+                        last_coord_max.position(),
+                        coord_max.position(),
+                        roof_rgb
+                    ));
                 }
             }
-
-            if i == 0 {
-                first_coordinate_opt = Some(coordinate.duplicate());
-            }
-            last_coordinate_opt = Some(coordinate);
         }
     }
 
@@ -559,7 +581,7 @@ fn main() {
 
             let w_w = w.width() as i32;
             let w_h = w.height() as i32;
-            let screen = viewport.screen(w_w as f64, w_h as f64, 3600.0);
+            let screen = viewport.screen(w_w as f64, w_h as f64);
 
             triangles.clear();
             triangles.par_extend(
@@ -599,7 +621,7 @@ fn main() {
 
                     let z = a_screen.2.min(b_screen.2).min(c_screen.2);
 
-                    let value = (z.log2() * 0.125).max(0.125).min(1.0);
+                    let value = (z.log2() * 0.25).max(0.25).min(1.0);
                     let cr = (((triangle.3).0 as f64) * value) as u8;
                     let cg = (((triangle.3).1 as f64) * value) as u8;
                     let cb = (((triangle.3).2 as f64) * value) as u8;
