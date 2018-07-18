@@ -72,6 +72,7 @@ impl Triangle {
         r.wu_line(b.x, b.y, c.x, c.y, color);
     }
 
+    // Adapted from https://github.com/ssloy/tinyrenderer/wiki/Lesson-2:-Triangle-rasterization-and-back-face-culling
     fn fill<R: Renderer>(&self, r: &mut R, color: Color) {
         use orbclient::renderer::fast_set32;
 
@@ -291,17 +292,6 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
             color as u8
         );
 
-        let roof_color = way.tags.get("roof:colour")
-            .or(way.tags.get("roof:color"))
-            .and_then(parse_color)
-            .unwrap_or(color);
-
-        let roof_rgb = (
-            (roof_color >> 16) as u8,
-            (roof_color >> 8) as u8,
-            roof_color as u8
-        );
-
         for i in 1..coords.len() {
             let last_coord = &coords[i - 1];
             let coord = &coords[i];
@@ -345,40 +335,49 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
             ));
         }
 
-        /*
         if let Some(height) = height_opt {
             if coords.len() >= 3 {
-                let mut points = Vec::with_capacity(coords.len());
+                let roof_color_opt = way.tags.get("roof:colour")
+                    .or(way.tags.get("roof:color"))
+                    .and_then(parse_color);
 
-                let first = &coords[0];
-                for coord in coords.iter() {
-                    //TODO: Flatten into cartesian coordinates (such as distance from first coord)
-                    let d = first.distance(coord);
-                    let h = first.heading(coord);
-                    let x = d * h.to_radians().cos();
-                    let y = d * h.to_radians().sin();
-                    points.push([x, y]);
-                }
+                if let Some(roof_color) = roof_color_opt {
+                    let roof_rgb = (
+                        (roof_color >> 16) as u8,
+                        (roof_color >> 8) as u8,
+                        roof_color as u8
+                    );
 
-                let indexes = polygon2::triangulate(&points);
-                if indexes.len() < points.len() {
-                    println!("{:?} => {:?}", points, indexes);
-                }
-                for chunk in indexes.chunks(3) {
-                    let a = coords[chunk[0]].offset(height, 0.0, 90.0);
-                    let b = coords[chunk[1]].offset(height, 0.0, 90.0);
-                    let c = coords[chunk[2]].offset(height, 0.0, 90.0);
+                    let mut points = Vec::with_capacity(coords.len());
 
-                    triangles.push((
-                        a.position(),
-                        b.position(),
-                        c.position(),
-                        roof_rgb,
-                    ))
+                    let first = &coords[0];
+                    for coord in coords.iter() {
+                        let d = first.distance(coord);
+                        let h = first.heading(coord);
+                        let x = d * h.to_radians().cos();
+                        let y = d * h.to_radians().sin();
+                        points.push([x, y]);
+                    }
+
+                    let indexes = polygon2::triangulate(&points);
+                    if indexes.len() < points.len() {
+                        println!("{:?} => {:?}", points, indexes);
+                    }
+                    for chunk in indexes.chunks(3) {
+                        let a = coords[chunk[0]].offset(height, 0.0, 90.0);
+                        let b = coords[chunk[1]].offset(height, 0.0, 90.0);
+                        let c = coords[chunk[2]].offset(height, 0.0, 90.0);
+
+                        triangles.push((
+                            a.position(),
+                            b.position(),
+                            c.position(),
+                            roof_rgb,
+                        ))
+                    }
                 }
             }
         }
-        */
     }
 
     triangles
