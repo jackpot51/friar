@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 struct Point {
     x: i32,
     y: i32,
+    z: f32,
 }
 
 struct Triangle {
@@ -73,15 +74,28 @@ impl Triangle {
     }
 
     // Adapted from https://github.com/ssloy/tinyrenderer/wiki/Lesson-2:-Triangle-rasterization-and-back-face-culling
-    fn fill<R: Renderer>(&self, r: &mut R, color: Color) {
-        use orbclient::renderer::fast_set32;
+    fn fill<R: Renderer>(&self, r: &mut R, z_buffer: &mut [f32], colors: (Color, Color, Color)) {
+        let a = self.a;
+        let b = self.b;
+        let c = self.c;
 
-        let t0 = self.a;
-        let t1 = self.b;
-        let t2 = self.c;
-        let d = color.data | 0xFF000000;
+        let color_a = (
+            ((colors.0.data >> 16) & 0xFF) as f32,
+            ((colors.0.data >> 8) & 0xFF) as f32,
+            (colors.0.data & 0xFF) as f32
+        );
+        let color_b = (
+            ((colors.1.data >> 16) & 0xFF) as f32,
+            ((colors.1.data >> 8) & 0xFF) as f32,
+            (colors.1.data & 0xFF) as f32
+        );
+        let color_c = (
+            ((colors.2.data >> 16) & 0xFF) as f32,
+            ((colors.2.data >> 8) & 0xFF) as f32,
+            (colors.2.data & 0xFF) as f32
+        );
 
-        if t0.y == t1.y && t0.y == t2.y {
+        if a.y == b.y && a.y == c.y {
             return;
         }
 
@@ -89,36 +103,73 @@ impl Triangle {
         let h = r.height() as i32;
 
         let data = r.data_mut();
-        let data_ptr = data.as_mut_ptr() as *mut u32;
 
-        let total_height = t2.y-t0.y;
+        let total_height = c.y-a.y;
         let mut i = 0;
         while i<total_height {
-            let y = t0.y + i;
+            let y = a.y + i;
 
             if y >= h {
                 break;
             } else if y >= 0 {
-                let second_half = i>t1.y-t0.y || t1.y==t0.y;
-                let segment_height = if second_half { t2.y-t1.y } else { t1.y-t0.y };
+                let second_half = i>b.y-a.y || b.y==a.y;
+                let segment_height = if second_half { c.y-b.y } else { b.y-a.y };
 
                 let alpha = (i as f32)/(total_height as f32);
-                let beta  = ((i-(if second_half { t1.y-t0.y } else { 0 })) as f32)/(segment_height as f32); // be careful: with above conditions no division by zero here
+                let beta  = ((i-(if second_half { b.y-a.y } else { 0 })) as f32)/(segment_height as f32); // be careful: with above conditions no division by zero here
 
-                let ax = t0.x + (((t2.x-t0.x) as f32)*alpha) as i32;
-                let bx = if second_half { t1.x + (((t2.x-t1.x) as f32)*beta) as i32 } else { t0.x + (((t1.x-t0.x) as f32)*beta) as i32 };
+                let alphax = a.x + (((c.x-a.x) as f32)*alpha) as i32;
+                let betax = if second_half { b.x + (((c.x-b.x) as f32)*beta) as i32 } else { a.x + (((b.x-a.x) as f32)*beta) as i32 };
 
-                let (minx, maxx) = if ax > bx { (bx, ax) } else { (ax, bx) };
+                let (minx, maxx) = if alphax > betax { (betax, alphax) } else { (alphax, betax) };
                 let x1 = cmp::max(minx, 0);
                 let x2 = cmp::min(maxx, w - 1);
 
                 if x1 < x2 && y >= 0 && y < h {
-                    let offset = y * w + x1;
-                    let len = x2 + 1 - x1;
-                    //println!("{}, {}", offset, len);
-                    unsafe {
-                        fast_set32(data_ptr.offset(offset as isize), d, len as usize);
+                    for x in x1..x2 + 1 {
+                        let da = (((x - a.x) as f32).powi(2) + ((y - a.y) as f32).powi(2)).sqrt();
+                        let wa = 1.0/da;
+
+                        let db = (((x - b.x) as f32).powi(2) + ((y - b.y) as f32).powi(2)).sqrt();
+                        let wb = 1.0/db;
+
+                        let dc = (((x - c.x) as f32).powi(2) + ((y - c.y) as f32).powi(2)).sqrt();
+                        let wc = 1.0/dc;
+
+                        let color = (
+                            (wa * color_a.0 + wb * color_b.0 + wc * color_c.0)
+                            /
+                            (wa + wb + wc),
+                            (wa * color_a.1 + wb * color_b.1 + wc * color_c.1)
+                            /
+                            (wa + wb + wc),
+                            (wa * color_a.2 + wb * color_b.2 + wc * color_c.2)
+                            /
+                            (wa + wb + wc)
+                        );
+
+                        let z = (wa * a.z + wb * b.z + wc * c.z)
+                            /
+                            (wa + wb + wc);
+
+                        let offset = (y * w + x) as usize;
+                        if z_buffer[offset] < z {
+                            z_buffer[offset] = z;
+                            data[offset] = Color::rgb(color.0 as u8, color.1 as u8, color.2 as u8);
+                        }
                     }
+
+                    /*
+                    let mut offset = (y * w + x1) as usize;
+                    let last_offset = offset + (x2 - x1) as usize;
+                    while offset <= last_offset {
+                        if z_buffer[offset] < z {
+                            z_buffer[offset] = z;
+                            data[offset] = color;
+                        }
+                        offset += 1;
+                    }
+                    */
                 }
             }
 
@@ -361,19 +412,21 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
 
                     let indexes = polygon2::triangulate(&points);
                     if indexes.len() < points.len() {
-                        println!("{:?} => {:?}", points, indexes);
+                        // println!("{:?} => {:?}", points, indexes);
                     }
                     for chunk in indexes.chunks(3) {
                         let a = coords[chunk[0]].offset(height, 0.0, 90.0);
                         let b = coords[chunk[1]].offset(height, 0.0, 90.0);
                         let c = coords[chunk[2]].offset(height, 0.0, 90.0);
 
+                        /*
                         triangles.push((
                             a.position(),
                             b.position(),
                             c.position(),
                             roof_rgb,
                         ))
+                        */
                     }
                 }
             }
@@ -440,6 +493,7 @@ fn main() {
     let mut redraw = true;
     let mut redraw_times = 2;
     let mut fill = true;
+    let mut z_buffer = vec![0.0; (w.width() * w.height()) as usize];
     let mut triangles = Vec::with_capacity(triangles_earth.len());
 
     let mut last_instant = Instant::now();
@@ -515,7 +569,8 @@ fn main() {
 
                         _ => (),
                     },
-                    EventOption::Resize(_resize_event) => {
+                    EventOption::Resize(resize_event) => {
+                        z_buffer = vec![0.0; (resize_event.width * resize_event.height) as usize];
                         redraw = true;
                     },
                     EventOption::Quit(_quit_event) => return,
@@ -524,64 +579,66 @@ fn main() {
             }
         }
 
-        if move_forward {
-            viewer = viewer.offset(speed, heading, 0.0);
-            redraw = true;
-        }
+        {
+            if move_forward {
+                viewer = viewer.offset(speed, heading, 0.0);
+                redraw = true;
+            }
 
-        if move_aft {
-            viewer = viewer.offset(-speed, heading, 0.0);
-            redraw = true;
-        }
+            if move_aft {
+                viewer = viewer.offset(-speed, heading, 0.0);
+                redraw = true;
+            }
 
-        if move_left {
-            viewer = viewer.offset(-speed, heading + 90.0, 0.0);
-            redraw = true;
-        }
+            if move_left {
+                viewer = viewer.offset(-speed, heading + 90.0, 0.0);
+                redraw = true;
+            }
 
-        if move_right {
-            viewer = viewer.offset(speed, heading + 90.0, 0.0);
-            redraw = true;
-        }
+            if move_right {
+                viewer = viewer.offset(speed, heading + 90.0, 0.0);
+                redraw = true;
+            }
 
-        if move_up {
-            viewer = viewer.offset(speed, 0.0, 90.0);
-            redraw = true;
-        }
+            if move_up {
+                viewer = viewer.offset(speed, 0.0, 90.0);
+                redraw = true;
+            }
 
-        if move_down {
-            viewer = viewer.offset(-speed, 0.0, 90.0);
-            redraw = true;
-        }
+            if move_down {
+                viewer = viewer.offset(-speed, 0.0, 90.0);
+                redraw = true;
+            }
 
-        if rotate_left {
-            heading = (heading - speed_rot).mod_euc(360.0);
-            redraw = true;
-        }
+            if rotate_left {
+                heading = (heading - speed_rot).mod_euc(360.0);
+                redraw = true;
+            }
 
-        if rotate_right {
-            heading = (heading + speed_rot).mod_euc(360.0);
-            redraw = true;
-        }
+            if rotate_right {
+                heading = (heading + speed_rot).mod_euc(360.0);
+                redraw = true;
+            }
 
-        if rotate_up {
-            pitch = (pitch + speed_rot).mod_euc(360.0);
-            redraw = true;
-        }
+            if rotate_up {
+                pitch = (pitch + speed_rot).mod_euc(360.0);
+                redraw = true;
+            }
 
-        if rotate_down {
-            pitch = (pitch - speed_rot).mod_euc(360.0);
-            redraw = true;
-        }
+            if rotate_down {
+                pitch = (pitch - speed_rot).mod_euc(360.0);
+                redraw = true;
+            }
 
-        if roll_left {
-            roll = (roll - speed_rot).mod_euc(360.0);
-            redraw = true;
-        }
+            if roll_left {
+                roll = (roll - speed_rot).mod_euc(360.0);
+                redraw = true;
+            }
 
-        if roll_right {
-            roll = (roll + speed_rot).mod_euc(360.0);
-            redraw = true;
+            if roll_right {
+                roll = (roll + speed_rot).mod_euc(360.0);
+                redraw = true;
+            }
         }
 
         if redraw {
@@ -625,41 +682,71 @@ fn main() {
                         return None;
                     }
 
+                    let a_dist = viewer_pos.vector(&triangle.0).norm() as f32;
+                    let b_dist = viewer_pos.vector(&triangle.1).norm() as f32;
+                    let c_dist = viewer_pos.vector(&triangle.2).norm() as f32;
+
                     let a = Point {
                         x: a_screen.0 as i32,
                         y: a_screen.1 as i32,
+                        z: 1.0 / a_dist,
                     };
 
                     let b = Point {
                         x: b_screen.0 as i32,
                         y: b_screen.1 as i32,
+                        z: 1.0 / b_dist,
                     };
 
                     let c = Point {
                         x: c_screen.0 as i32,
                         y: c_screen.1 as i32,
+                        z: 1.0 / c_dist,
                     };
 
-                    let z = a_screen.2.min(b_screen.2).min(c_screen.2);
+                    let (cr, cg, cb) = (
+                        (triangle.3).0 as f32,
+                        (triangle.3).1 as f32,
+                        (triangle.3).2 as f32
+                    );
 
-                    let value = (z.log2() * 0.25).max(0.25).min(1.0);
-                    let cr = (((triangle.3).0 as f64) * value) as u8;
-                    let cg = (((triangle.3).1 as f64) * value) as u8;
-                    let cb = (((triangle.3).2 as f64) * value) as u8;
+                    let a_value = (a_dist.log10() * 0.25).max(0.25).min(1.0);
+                    let a_cr = (cr * a_value) as u8;
+                    let a_cg = (cg * a_value) as u8;
+                    let a_cb = (cb * a_value) as u8;
 
-                    Some((z, Triangle::new(a, b, c), Color::rgb(cr, cg, cb)))
+                    let b_value = (b_dist.log10() * 0.25).max(0.25).min(1.0);
+                    let b_cr = (cr * b_value) as u8;
+                    let b_cg = (cg * b_value) as u8;
+                    let b_cb = (cb * b_value) as u8;
+
+                    let c_value = (c_dist.log10() * 0.25).max(0.25).min(1.0);
+                    let c_cr = (cr * c_value) as u8;
+                    let c_cg = (cg * c_value) as u8;
+                    let c_cb = (cb * c_value) as u8;
+
+                    Some((
+                        Triangle::new(a, b, c),
+                        (
+                            Color::rgb(a_cr, a_cg, a_cb),
+                            Color::rgb(b_cr, b_cg, b_cb),
+                            Color::rgb(c_cr, c_cg, c_cb)
+                        )
+                    ))
                 })
             );
 
-            triangles.par_sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-
             w.set(Color::rgb(0, 0, 0));
 
-            for (_z, triangle, color) in triangles.iter() {
+            for i in 0..z_buffer.len() {
+                z_buffer[i] = 0.0;
+            }
+
+            for (triangle, colors) in triangles.iter() {
                 if fill {
-                    triangle.fill(&mut w, *color);
+                    triangle.fill(&mut w, &mut z_buffer, *colors);
                 } else {
-                    triangle.draw(&mut w, *color);
+                    triangle.draw(&mut w, (*colors).0);
                 }
             }
 
