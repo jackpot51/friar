@@ -74,26 +74,10 @@ impl Triangle {
     }
 
     // Adapted from https://github.com/ssloy/tinyrenderer/wiki/Lesson-2:-Triangle-rasterization-and-back-face-culling
-    fn fill<R: Renderer>(&self, r: &mut R, z_buffer: &mut [f32], colors: (Color, Color, Color)) {
+    fn fill<R: Renderer>(&self, r: &mut R, z_buffer: &mut [f32], color: Color) {
         let a = self.a;
         let b = self.b;
         let c = self.c;
-
-        let color_a = (
-            ((colors.0.data >> 16) & 0xFF) as f32,
-            ((colors.0.data >> 8) & 0xFF) as f32,
-            (colors.0.data & 0xFF) as f32
-        );
-        let color_b = (
-            ((colors.1.data >> 16) & 0xFF) as f32,
-            ((colors.1.data >> 8) & 0xFF) as f32,
-            (colors.1.data & 0xFF) as f32
-        );
-        let color_c = (
-            ((colors.2.data >> 16) & 0xFF) as f32,
-            ((colors.2.data >> 8) & 0xFF) as f32,
-            (colors.2.data & 0xFF) as f32
-        );
 
         if a.y == b.y && a.y == c.y {
             return;
@@ -127,49 +111,40 @@ impl Triangle {
 
                 if x1 < x2 && y >= 0 && y < h {
                     for x in x1..x2 + 1 {
-                        let da = (((x - a.x) as f32).powi(2) + ((y - a.y) as f32).powi(2)).sqrt();
-                        let wa = 1.0/da;
-
-                        let db = (((x - b.x) as f32).powi(2) + ((y - b.y) as f32).powi(2)).sqrt();
-                        let wb = 1.0/db;
-
-                        let dc = (((x - c.x) as f32).powi(2) + ((y - c.y) as f32).powi(2)).sqrt();
-                        let wc = 1.0/dc;
-
-                        let color = (
-                            (wa * color_a.0 + wb * color_b.0 + wc * color_c.0)
+                        let wa = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) as f32
                             /
-                            (wa + wb + wc),
-                            (wa * color_a.1 + wb * color_b.1 + wc * color_c.1)
+                            ((b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y)) as f32;
+
+                        let wb = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) as f32
                             /
-                            (wa + wb + wc),
-                            (wa * color_a.2 + wb * color_b.2 + wc * color_c.2)
+                            ((b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y)) as f32;
+
+                        let wc = 1.0 - wa - wb;
+
+                        let weight = |va: f32, vb: f32, vc: f32| -> f32{
+                            (wa * va + wb * vb + wc * vc)
                             /
                             (wa + wb + wc)
-                        );
+                        };
 
-                        let z = (wa * a.z + wb * b.z + wc * c.z)
-                            /
-                            (wa + wb + wc);
+                        let z = weight(a.z, b.z, c.z);
 
                         let offset = (y * w + x) as usize;
                         if z_buffer[offset] < z {
                             z_buffer[offset] = z;
-                            data[offset] = Color::rgb(color.0 as u8, color.1 as u8, color.2 as u8);
-                        }
-                    }
 
-                    /*
-                    let mut offset = (y * w + x1) as usize;
-                    let last_offset = offset + (x2 - x1) as usize;
-                    while offset <= last_offset {
-                        if z_buffer[offset] < z {
-                            z_buffer[offset] = z;
-                            data[offset] = color;
+                            let scale = (z * 64.0).max(0.1).min(1.0);
+                            data[offset] = Color::rgb(
+                                // The following is to debug z-buffer
+                                // (z * 16384.0).min(255.0) as u8,
+                                // (z * 16384.0).min(255.0) as u8,
+                                // (z * 16384.0).min(255.0) as u8
+                                (color.r() as f32 * scale) as u8,
+                                (color.g() as f32 * scale) as u8,
+                                (color.b() as f32 * scale) as u8
+                            );
                         }
-                        offset += 1;
                     }
-                    */
                 }
             }
 
@@ -419,14 +394,12 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
                         let b = coords[chunk[1]].offset(height, 0.0, 90.0);
                         let c = coords[chunk[2]].offset(height, 0.0, 90.0);
 
-                        /*
                         triangles.push((
                             a.position(),
                             b.position(),
                             c.position(),
                             roof_rgb,
                         ))
-                        */
                     }
                 }
             }
@@ -664,27 +637,30 @@ fn main() {
             triangles.clear();
             triangles.par_extend(
                 triangles_earth.par_iter().filter_map(|triangle| {
-                    let a_ground = ground_perspective.transform(&triangle.0);
+                    let a_earth = &triangle.0;
+                    let a_ground = ground_perspective.transform(a_earth);
                     let a_screen = screen.transform(&a_ground);
                     if a_screen.2 < 0.0 {
                         return None;
                     }
 
-                    let b_ground = ground_perspective.transform(&triangle.1);
+                    let b_earth = &triangle.1;
+                    let b_ground = ground_perspective.transform(b_earth);
                     let b_screen = screen.transform(&b_ground);
                     if b_screen.2 < 0.0 {
                         return None;
                     }
 
-                    let c_ground = ground_perspective.transform(&triangle.2);
+                    let c_earth = &triangle.2;
+                    let c_ground = ground_perspective.transform(c_earth);
                     let c_screen = screen.transform(&c_ground);
                     if c_screen.2 < 0.0 {
                         return None;
                     }
 
-                    let a_dist = viewer_pos.vector(&triangle.0).norm() as f32;
-                    let b_dist = viewer_pos.vector(&triangle.1).norm() as f32;
-                    let c_dist = viewer_pos.vector(&triangle.2).norm() as f32;
+                    let a_dist = viewer_pos.vector(&a_earth).norm() as f32;
+                    let b_dist = viewer_pos.vector(&b_earth).norm() as f32;
+                    let c_dist = viewer_pos.vector(&c_earth).norm() as f32;
 
                     let a = Point {
                         x: a_screen.0 as i32,
@@ -705,33 +681,14 @@ fn main() {
                     };
 
                     let (cr, cg, cb) = (
-                        (triangle.3).0 as f32,
-                        (triangle.3).1 as f32,
-                        (triangle.3).2 as f32
+                        (triangle.3).0,
+                        (triangle.3).1,
+                        (triangle.3).2
                     );
-
-                    let a_value = (a_dist.log10() * 0.25).max(0.25).min(1.0);
-                    let a_cr = (cr * a_value) as u8;
-                    let a_cg = (cg * a_value) as u8;
-                    let a_cb = (cb * a_value) as u8;
-
-                    let b_value = (b_dist.log10() * 0.25).max(0.25).min(1.0);
-                    let b_cr = (cr * b_value) as u8;
-                    let b_cg = (cg * b_value) as u8;
-                    let b_cb = (cb * b_value) as u8;
-
-                    let c_value = (c_dist.log10() * 0.25).max(0.25).min(1.0);
-                    let c_cr = (cr * c_value) as u8;
-                    let c_cg = (cg * c_value) as u8;
-                    let c_cb = (cb * c_value) as u8;
 
                     Some((
                         Triangle::new(a, b, c),
-                        (
-                            Color::rgb(a_cr, a_cg, a_cb),
-                            Color::rgb(b_cr, b_cg, b_cb),
-                            Color::rgb(c_cr, c_cg, c_cb)
-                        )
+                        Color::rgb(cr, cg, cb),
                     ))
                 })
             );
@@ -742,11 +699,11 @@ fn main() {
                 z_buffer[i] = 0.0;
             }
 
-            for (triangle, colors) in triangles.iter() {
+            for (triangle, color) in triangles.iter() {
                 if fill {
-                    triangle.fill(&mut w, &mut z_buffer, *colors);
+                    triangle.fill(&mut w, &mut z_buffer, *color);
                 } else {
-                    triangle.draw(&mut w, (*colors).0);
+                    triangle.draw(&mut w, *color);
                 }
             }
 

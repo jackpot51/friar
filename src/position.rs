@@ -33,12 +33,18 @@ impl<'r, R: Reference> Position<'r, R> {
         Self::new(self.reference, self.x, self.y, self.z)
     }
 
+    /// Calculate Vector to Position
     pub fn vector(&'r self, to: &Self) -> Vector<'r, R> {
         let x = to.x - self.x;
         let y = to.y - self.y;
         let z = to.z - self.z;
 
         Vector::new(self.reference, x, y, z)
+    }
+
+    /// Convert into Vector from origin
+    pub fn to_vector(&'r self) -> Vector<'r, R> {
+        Vector::new(self.reference, self.x, self.y, self.z)
     }
 
     /// Create Perspective from this Position
