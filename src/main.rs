@@ -3,6 +3,7 @@
 extern crate friar;
 extern crate orbclient;
 extern crate osmpbfreader;
+extern crate polygon2;
 extern crate rayon;
 
 use friar::coordinate::Coordinate;
@@ -177,8 +178,8 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
         coordinate.longitude < bounds.3
     };
 
-    let parse_height = |s: &String| -> f64 {
-        match s.replace("'", "").replace(" m", "").parse::<f64>() {
+    let parse_height = |s: &String| -> Option<f64> {
+        Some(match s.replace("'", "").replace(" m", "").parse::<f64>() {
             Ok(height) => if s.ends_with("'") {
                 height * 3.28084
             } else {
@@ -186,13 +187,13 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
             },
             Err(err) => {
                 println!("Failed to parse height {}: {}", s, err);
-                0.0
+                return None;
             }
-        }
+        })
     };
 
-    let parse_color = |s: &String| -> u32 {
-        match s.as_str() {
+    let parse_color = |s: &String| -> Option<u32> {
+        Some(match s.as_str() {
             "black" => 0x404040, //0x000000,
             "white" => 0xFFFFFF,
             "gray" | "grey" => 0x808080,
@@ -226,21 +227,21 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
                     Ok(color) => color,
                     Err(err) => {
                         println!("Failed to parse color {}: {}", s, err);
-                        0xFFFFFF
+                        return None;
                     }
                 }
             }
-        }
+        })
     };
 
-    let parse_levels = |s: &String| {
-        match s.parse::<f64>() {
+    let parse_levels = |s: &String| -> Option<f64> {
+        Some(match s.parse::<f64>() {
             Ok(levels) => levels * 3.0,
             Err(err) => {
                 println!("Failed to parse levels {}: {}", s, err);
-                3.0
+                return None;
             }
-        }
+        })
     };
 
     let mut triangles = Vec::with_capacity(ways.len());
@@ -268,20 +269,20 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
         }
 
         let min_height = way.tags.get("min_height")
-            .map(parse_height)
+            .and_then(parse_height)
             .unwrap_or(0.0);
 
         let height_opt = way.tags.get("height")
             .or(way.tags.get("building:height"))
-            .map(parse_height)
+            .and_then(parse_height)
             .or(way.tags.get("building:levels")
-            .map(parse_levels))
+            .and_then(parse_levels))
             .or(way.tags.get("building")
-            .map(|_x| 3.0));
+            .map(|_| 3.0));
 
         let color = way.tags.get("building:colour")
             .or(way.tags.get("building:color"))
-            .map(parse_color)
+            .and_then(parse_color)
             .unwrap_or(0xFFFFFF);
 
         let rgb = (
@@ -292,7 +293,7 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
 
         let roof_color = way.tags.get("roof:colour")
             .or(way.tags.get("roof:color"))
-            .map(parse_color)
+            .and_then(parse_color)
             .unwrap_or(color);
 
         let roof_rgb = (
@@ -342,21 +343,42 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
                 last_coord_max.position(),
                 rgb
             ));
+        }
 
+        /*
+        if let Some(height) = height_opt {
+            if coords.len() >= 3 {
+                let mut points = Vec::with_capacity(coords.len());
 
-            if i >= 2 {
-                let first_coord = &coords[0];
-                if let Some(height) = height_opt {
-                    let first_coord_max = first_coord.offset(height, 0.0, 90.0);
+                let first = &coords[0];
+                for coord in coords.iter() {
+                    //TODO: Flatten into cartesian coordinates (such as distance from first coord)
+                    let d = first.distance(coord);
+                    let h = first.heading(coord);
+                    let x = d * h.to_radians().cos();
+                    let y = d * h.to_radians().sin();
+                    points.push([x, y]);
+                }
+
+                let indexes = polygon2::triangulate(&points);
+                if indexes.len() < points.len() {
+                    println!("{:?} => {:?}", points, indexes);
+                }
+                for chunk in indexes.chunks(3) {
+                    let a = coords[chunk[0]].offset(height, 0.0, 90.0);
+                    let b = coords[chunk[1]].offset(height, 0.0, 90.0);
+                    let c = coords[chunk[2]].offset(height, 0.0, 90.0);
+
                     triangles.push((
-                        first_coord_max.position(),
-                        last_coord_max.position(),
-                        coord_max.position(),
-                        roof_rgb
-                    ));
+                        a.position(),
+                        b.position(),
+                        c.position(),
+                        roof_rgb,
+                    ))
                 }
             }
         }
+        */
     }
 
     triangles
