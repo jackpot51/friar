@@ -243,7 +243,8 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
 
         let height_opt = way.tags.get("height")
             .or(way.tags.get("building:height"))
-            .map(parse_height);
+            .map(parse_height)
+            .or(way.tags.get("building").map(|_x| 10.0));
 
         let color = way.tags.get("building:colour")
             .or(way.tags.get("building:color"))
@@ -256,8 +257,9 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
             color as u8
         );
 
+        let mut first_coordinate_opt = None;
         let mut last_coordinate_opt = None;
-        for node_id in way.nodes.iter() {
+        for (i, node_id) in way.nodes.iter().enumerate() {
             let node = &nodes[node_id];
             // println!("  {:?}", node);
 
@@ -285,6 +287,22 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
                             last_coord_max.position(),
                             rgb
                         ));
+
+                        if i >= 2 {
+                            if let Some(ref first_coordinate) = first_coordinate_opt {
+                                if in_bounds(&first_coordinate) {
+                                    /*TODO: Roofs
+                                    let first_coord_max = first_coordinate.offset(height, 0.0, 90.0);
+                                    triangles.push((
+                                        first_coord_max.position(),
+                                        last_coord_max.position(),
+                                        coord_max.position(),
+                                        rgb //TODO: roof color
+                                    ));
+                                    */
+                                }
+                            }
+                        }
                     } else {
                         let thickness = 0.25;
                         let heading = last_coordinate.heading(&coordinate);
@@ -312,6 +330,9 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
                 }
             }
 
+            if i == 0 {
+                first_coordinate_opt = Some(coordinate.duplicate());
+            }
             last_coordinate_opt = Some(coordinate);
         }
     }
