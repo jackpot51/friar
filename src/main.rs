@@ -424,8 +424,8 @@ fn main() {
     let earth = Earth;
 
     let origin = earth.coordinate(39.739230, -104.987403, 2000.0);
-    let km_sw = origin.offset(5.0, 225.0, 0.0);
-    let km_ne = origin.offset(5.0, 45.0, 0.0);
+    let km_sw = origin.offset(1000.0, 225.0, 0.0);
+    let km_ne = origin.offset(1000.0, 45.0, 0.0);
 
     println!("Origin: {}", origin);
     println!("SW: {}", km_sw);
@@ -659,20 +659,13 @@ fn main() {
                     };
 
                     if debug {
-                        if !valid(&a_screen) {
-                            println!("{}: {:?}", i, a_screen);
-                        }
-
-                        if !valid(&b_screen) {
-                            println!("{}: {:?}", i, b_screen);
-                        }
-
-                        if !valid(&c_screen) {
-                            println!("{}: {:?}", i, c_screen);
-                        }
+                        println!("{}:", i);
+                        println!("    {}, {}, {}", a_earth, b_earth, c_earth);
+                        println!("    {}, {}, {}", a_ground, b_ground, c_ground);
+                        println!("    {:?}, {:?}, {:?}", a_screen, b_screen, c_screen);
                     }
 
-                    if !valid(&a_screen) && !valid(&b_screen) && !valid(&c_screen) {
+                    if !valid(&a_screen) || !valid(&b_screen) || !valid(&c_screen) {
                         return None;
                     }
 
