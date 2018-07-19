@@ -423,7 +423,12 @@ fn main() {
 
     let earth = Earth;
 
-    let origin = earth.coordinate(39.739230, -104.987403, 2000.0);
+    let ground = 1600.0;
+
+    let center = earth.coordinate(39.739230, -104.987403, ground);
+    let orientation = (0.0, 270.0 + 45.0, 0.0);
+    let origin = center.offset(-400.0, orientation.0, orientation.1);
+
     let km_sw = origin.offset(1000.0, 225.0, 0.0);
     let km_ne = origin.offset(1000.0, 45.0, 0.0);
 
@@ -439,13 +444,13 @@ fn main() {
             km_sw.latitude, km_sw.longitude,
             km_ne.latitude, km_ne.longitude,
         ),
-        1597.0
+        ground
     );
 
     let mut viewer = origin.duplicate();
-    let mut heading = 0.0;
-    let mut pitch = 270.0;
-    let mut roll = 0.0;
+    let mut heading = orientation.0;
+    let mut pitch = orientation.1;
+    let mut roll = orientation.2;
 
     let mut move_left = false;
     let mut move_right = false;
@@ -528,9 +533,9 @@ fn main() {
                             roll_right = key_event.pressed;
                         },
                         orbclient::K_P if key_event.pressed => {
-                            heading = 0.0;
-                            pitch = 270.0;
-                            roll = 0.0;
+                            heading = orientation.0;
+                            pitch = orientation.1;
+                            roll = orientation.2;
                             redraw = true;
                         },
 
