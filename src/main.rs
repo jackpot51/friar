@@ -79,23 +79,23 @@ impl Triangle {
         let b = self.b;
         let c = self.c;
 
-        if a.y == b.y && a.y == c.y {
-            return;
-        }
+        // if a.y == b.y && a.y == c.y {
+        //     return;
+        // }
 
         let w = r.width() as i32;
         let h = r.height() as i32;
 
         let data = r.data_mut();
 
-        let total_height = c.y-a.y;
-        let mut i = 0;
-        while i<total_height {
-            let y = a.y + i;
+        let y1 = cmp::max(a.y, 0);
+        let y2 = cmp::min(c.y, h - 1);
+        if y1 < y2 {
+            let total_height = c.y-a.y;
+            //TODO: Reduce operations in loop
+            for y in y1..y2 + 1 {
+                let i = y - a.y;
 
-            if y >= h {
-                break;
-            } else if y >= 0 {
                 let second_half = i>b.y-a.y || b.y==a.y;
                 let segment_height = if second_half { c.y-b.y } else { b.y-a.y };
 
@@ -109,7 +109,7 @@ impl Triangle {
                 let x1 = cmp::max(minx, 0);
                 let x2 = cmp::min(maxx, w - 1);
 
-                if x1 < x2 && y >= 0 && y < h {
+                if x1 < x2 {
                     for x in x1..x2 + 1 {
                         let wa = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) as f32
                             /
@@ -147,8 +147,6 @@ impl Triangle {
                     }
                 }
             }
-
-            i += 1;
         }
     }
 }
@@ -426,8 +424,8 @@ fn main() {
     let earth = Earth;
 
     let origin = earth.coordinate(39.739230, -104.987403, 2000.0);
-    let km_sw = origin.offset(1000.0, 225.0, 0.0);
-    let km_ne = origin.offset(1000.0, 45.0, 0.0);
+    let km_sw = origin.offset(5.0, 225.0, 0.0);
+    let km_ne = origin.offset(5.0, 45.0, 0.0);
 
     println!("Origin: {}", origin);
     println!("SW: {}", km_sw);
@@ -463,6 +461,7 @@ fn main() {
     let mut roll_left = false;
     let mut roll_right = false;
 
+    let mut debug = false;
     let mut redraw = true;
     let mut redraw_times = 2;
     let mut fill = true;
@@ -537,6 +536,10 @@ fn main() {
 
                         orbclient::K_F if key_event.pressed => {
                             fill = !fill;
+                            redraw = true;
+                        },
+                        orbclient::K_B if key_event.pressed => {
+                            debug = !debug;
                             redraw = true;
                         },
 
@@ -636,25 +639,40 @@ fn main() {
 
             triangles.clear();
             triangles.par_extend(
-                triangles_earth.par_iter().filter_map(|triangle| {
+                triangles_earth.par_iter().enumerate().filter_map(|(i, triangle)| {
                     let a_earth = &triangle.0;
                     let a_ground = ground_perspective.transform(a_earth);
                     let a_screen = screen.transform(&a_ground);
-                    if a_screen.2 < 0.0 {
-                        return None;
-                    }
 
                     let b_earth = &triangle.1;
                     let b_ground = ground_perspective.transform(b_earth);
                     let b_screen = screen.transform(&b_ground);
-                    if b_screen.2 < 0.0 {
-                        return None;
-                    }
 
                     let c_earth = &triangle.2;
                     let c_ground = ground_perspective.transform(c_earth);
                     let c_screen = screen.transform(&c_ground);
-                    if c_screen.2 < 0.0 {
+
+                    let valid = |point: &(f64, f64, f64)| {
+                        point.0 > 0.0 && point.0 < screen.x &&
+                        point.1 > 0.0 && point.1 < screen.y &&
+                        point.2 > 0.0
+                    };
+
+                    if debug {
+                        if !valid(&a_screen) {
+                            println!("{}: {:?}", i, a_screen);
+                        }
+
+                        if !valid(&b_screen) {
+                            println!("{}: {:?}", i, b_screen);
+                        }
+
+                        if !valid(&c_screen) {
+                            println!("{}: {:?}", i, c_screen);
+                        }
+                    }
+
+                    if !valid(&a_screen) && !valid(&b_screen) && !valid(&c_screen) {
                         return None;
                     }
 
@@ -689,6 +707,7 @@ fn main() {
                     Some((
                         Triangle::new(a, b, c),
                         Color::rgb(cr, cg, cb),
+                        i,
                     ))
                 })
             );
@@ -699,9 +718,26 @@ fn main() {
                 z_buffer[i] = 0.0;
             }
 
-            for (triangle, color) in triangles.iter() {
+            for (triangle, color, i) in triangles.iter() {
                 if fill {
                     triangle.fill(&mut w, &mut z_buffer, *color);
+                    if debug {
+                        let _ = write!(
+                            WindowWriter::new(&mut w, triangle.a.x, triangle.a.y, *color),
+                            "{}",
+                            i
+                        );
+                        // let _ = write!(
+                        //     WindowWriter::new(&mut w, triangle.b.x, triangle.b.y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                        //     "{}",
+                        //     i
+                        // );
+                        // let _ = write!(
+                        //     WindowWriter::new(&mut w, triangle.c.x, triangle.c.y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                        //     "{}",
+                        //     i
+                        // );
+                    }
                 } else {
                     triangle.draw(&mut w, *color);
                 }
@@ -756,7 +792,7 @@ fn main() {
 
             w.sync();
         } else {
-            thread::sleep(Duration::new(0, 1000000000/60));
+            thread::sleep(Duration::new(0, 1000000000/1000));
         }
     }
 }
