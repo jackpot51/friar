@@ -427,6 +427,7 @@ fn main() {
 
     let center = earth.coordinate(39.739230, -104.987403, ground);
     let orientation = (0.0, 270.0 + 45.0, 0.0);
+    let original_fov = 90.0f64;
     let origin = center.offset(-400.0, orientation.0, orientation.1);
 
     let km_sw = origin.offset(1000.0, 225.0, 0.0);
@@ -451,6 +452,7 @@ fn main() {
     let mut heading = orientation.0;
     let mut pitch = orientation.1;
     let mut roll = orientation.2;
+    let mut fov = original_fov;
 
     let mut move_left = false;
     let mut move_right = false;
@@ -466,6 +468,9 @@ fn main() {
     let mut roll_left = false;
     let mut roll_right = false;
 
+    let mut zoom_in = false;
+    let mut zoom_out = false;
+
     let mut debug = false;
     let mut redraw = true;
     let mut redraw_times = 2;
@@ -480,7 +485,8 @@ fn main() {
         last_instant = instant;
         let time = duration.as_secs() as f64 + duration.subsec_nanos() as f64 / 1000000000.0;
         let speed = 250.0 * time;
-        let speed_rot = 90.0 * time;
+        let speed_rot = fov * time;
+        let speed_zoom = 30.0 * time;
 
         let mut found_event = true;
         while found_event {
@@ -536,6 +542,17 @@ fn main() {
                             heading = orientation.0;
                             pitch = orientation.1;
                             roll = orientation.2;
+                            redraw = true;
+                        },
+
+                        orbclient::K_Z => {
+                            zoom_in = key_event.pressed;
+                        },
+                        orbclient::K_X => {
+                            zoom_out = key_event.pressed;
+                        },
+                        orbclient::K_C if key_event.pressed => {
+                            fov = original_fov;
                             redraw = true;
                         },
 
@@ -620,6 +637,16 @@ fn main() {
                 roll = (roll + speed_rot).mod_euc(360.0);
                 redraw = true;
             }
+
+            if zoom_in {
+                fov = (fov - speed_zoom).max(1.0);
+                redraw = true;
+            }
+
+            if zoom_out {
+                fov = (fov + speed_zoom).min(180.0);
+                redraw = true;
+            }
         }
 
         if redraw {
@@ -636,7 +663,7 @@ fn main() {
             let ground_pos = ground_perspective.position(0.0, 0.0, 0.0);
 
             let perspective = ground_pos.perspective(pitch + 90.0, roll, heading - 90.0);
-            let viewport = perspective.viewport(0.0, 0.0, 1.0);
+            let viewport = perspective.viewport(0.0, 0.0, 1.0/(fov.to_radians()/2.0).tan());
 
             let w_w = w.width() as i32;
             let w_h = w.height() as i32;
@@ -765,6 +792,13 @@ fn main() {
                 WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
                 "Rot: {}, {}, {}",
                 heading, pitch, roll
+            );
+            y += 16;
+
+            let _ = write!(
+                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                "FOV: {}",
+                fov
             );
             y += 16;
 
