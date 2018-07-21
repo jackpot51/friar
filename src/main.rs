@@ -957,6 +957,55 @@ fn main() {
             {
                 //let vfov = fov * (w_w as f64)/(w_h as f64);
 
+                let mut h = 0;
+                while h < 360 {
+                    let h_coord = viewer.offset(1.0, h as f64, 0.0);
+                    let h_earth = h_coord.position();
+                    let h_ground = ground_perspective.transform(&h_earth);
+                    let h_screen = screen.transform(&h_ground);
+
+                    if h_screen.0 > 0.0 && h_screen.0 < screen.x &&
+                        h_screen.1 > 0.0 && h_screen.1 < screen.y &&
+                        h_screen.2 > 0.01
+                    {
+                        let size = 16.0;
+
+                        let r = roll.to_radians();
+                        let rc = r.cos();
+                        let rs = r.sin();
+
+                        let dx = size * rs;
+                        let dy = size * rc;
+
+                        w.wu_line(
+                            h_screen.0.round() as i32,
+                            h_screen.1.round() as i32,
+                            (h_screen.0 + dx).round() as i32,
+                            (h_screen.1 + dy).round() as i32,
+                            hud_color
+                        );
+
+                        let len = if h >= 100 {
+                            2
+                        } else {
+                            1
+                        };
+
+                        let _ = write!(
+                            WindowWriter::new(
+                                &mut w,
+                                (h_screen.0.round() as i32) - len * 4,
+                                (h_screen.1.round() as i32) - 16,
+                                hud_color
+                            ),
+                            "{}",
+                            h/10
+                        );
+                    }
+
+                    h += 10;
+                }
+
                 let mut p = -90;
                 while p <= 90 {
                     let p_coord = viewer.offset(1.0, heading, p as f64);
@@ -974,7 +1023,11 @@ fn main() {
                             64.0
                         };
 
-                        let hole = 24.0;
+                        let hole = if p == 0 {
+                            0.0
+                        } else {
+                            24.0
+                        };
 
                         let r = roll.to_radians();
                         let rc = r.cos();
@@ -1001,26 +1054,28 @@ fn main() {
                             hud_color
                         );
 
-                        let len = if p >= 10 {
-                            2
-                        } else if p >= 0 {
-                            1
-                        } else if p >= -9 {
-                            2
-                        } else {
-                            3
-                        };
+                        if p != 0 {
+                            let len = if p >= 10 {
+                                2
+                            } else if p >= 0 {
+                                1
+                            } else if p >= -9 {
+                                2
+                            } else {
+                                3
+                            };
 
-                        let _ = write!(
-                            WindowWriter::new(
-                                &mut w,
-                                (p_screen.0 as i32) - len * 4,
-                                (p_screen.1 as i32) - 8,
-                                hud_color
-                            ),
-                            "{}",
-                            p
-                        );
+                            let _ = write!(
+                                WindowWriter::new(
+                                    &mut w,
+                                    (p_screen.0.round() as i32) - len * 4,
+                                    (p_screen.1.round() as i32) - 8,
+                                    hud_color
+                                ),
+                                "{}",
+                                p
+                            );
+                        }
                     }
 
                     p += 5;
