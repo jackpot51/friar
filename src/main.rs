@@ -133,7 +133,7 @@ impl Triangle {
                         let z = weight(a.z, b.z, c.z);
 
                         let offset = (y * w + x) as usize;
-                        if z_buffer[offset] < z {
+                        if offset < z_buffer.len() && z_buffer[offset] < z {
                             z_buffer[offset] = z;
 
                             //let scale = (z * 64.0).max(0.1).min(1.0);
@@ -482,7 +482,7 @@ fn hgt<'r, R: Spheroid>(file: &HgtFile, reference: &'r R, bounds: (f64, f64, f64
 
 
 fn main() {
-    let mut w = Window::new_flags(-1, -1, 800, 600, "FRIAR", &[WindowFlag::Async, WindowFlag::Resizable]).unwrap();
+    let mut w = Window::new_flags(-1, -1, 1024, 768, "FRIAR", &[WindowFlag::Async, WindowFlag::Resizable]).unwrap();
 
     let _ = write!(
         WindowWriter::new(
@@ -501,7 +501,9 @@ fn main() {
         //39.639720, -104.854705 // Cherry Creek Reservoir
         //39.588303, -105.643829 // Mount Evans
         //39.739230, -104.987403 // Downtown Denver
-         40.573420, 14.297834
+        //40.573420, 14.297834 // Capri
+        //40.633537, 14.602547 // Amalfi
+        40.821181, 14.426308 // Mount Vesuvius
     );
 
     let hgt_lat = center_lat.floor();
@@ -540,10 +542,10 @@ fn main() {
     let center = earth.coordinate(center_lat, center_lon, ground);
     let orientation = (0.0, 270.0 + 45.0, 0.0);
     let original_fov = 90.0f64;
-    let origin = center.offset(-2000.0, orientation.0, orientation.1);
+    let origin = center.offset(-4000.0, orientation.0, orientation.1);
 
-    let km_sw = origin.offset(16000.0, 225.0, 0.0);
-    let km_ne = origin.offset(16000.0, 45.0, 0.0);
+    let km_sw = origin.offset(8000.0, 225.0, 0.0);
+    let km_ne = origin.offset(8000.0, 45.0, 0.0);
 
     println!("Center: {}", center);
     println!("Origin: {}", origin);
@@ -598,6 +600,8 @@ fn main() {
     let mut zoom_in = false;
     let mut zoom_out = false;
 
+    let mut shift = false;
+
     let mut debug = false;
     let mut redraw = true;
     let mut redraw_times = 2;
@@ -611,7 +615,7 @@ fn main() {
         let duration = instant.duration_since(last_instant);
         last_instant = instant;
         let time = duration.as_secs() as f64 + duration.subsec_nanos() as f64 / 1000000000.0;
-        let speed = 250.0 * time;
+        let speed = if shift { 1000.0 } else { 250.0 } * time;
         let speed_rot = fov * time;
         let speed_zoom = 30.0 * time;
 
@@ -680,6 +684,11 @@ fn main() {
                         },
                         orbclient::K_C if key_event.pressed => {
                             fov = original_fov;
+                            redraw = true;
+                        },
+
+                        orbclient::K_LEFT_SHIFT => {
+                            shift = key_event.pressed;
                             redraw = true;
                         },
 
