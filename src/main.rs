@@ -411,72 +411,49 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
     triangles
 }
 
-fn hgt<'r, R: Spheroid>(file: &HgtFile, reference: &'r R, bounds: (f64, f64, f64, f64), triangles: &mut Vec<(Position<'r, R>, Position<'r, R>, Position<'r, R>, (u8, u8, u8))>) {
-    let samples = file.resolution.samples();
-    for row in 2..(samples as i64) {
-        let prev_row = row - 1;
-        for col in 2..(samples as i64) {
+fn hgt<'r, R: Spheroid + Sync>(file: &HgtFile, reference: &'r R, bounds: (f64, f64, f64, f64), tiles: &mut Vec<(Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>)>) {
+    let samples = file.resolution.samples() as i64;
+
+    let start = file.position(bounds.0, bounds.1);
+    let end = file.position(bounds.2, bounds.3);
+
+    let start_row = cmp::max(1, start.0);
+    let start_col = cmp::max(1, start.1);
+    let end_row = cmp::min(samples - 1, end.0);
+    let end_col = cmp::min(samples - 1, end.1);
+
+    if end_row > start_row && end_col > start_col {
+        let rows = end_row - (start_row + 1);
+        let cols = end_col - (start_col + 1);
+
+        let cells = rows * cols;
+
+        let cell_map = |cell: i64| -> Option<(Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>)> {
+            let row = (cell / cols) + start_row;
+            let prev_row = row - 1;
+
+            let col = (cell % cols) + start_col;
             let prev_col = col - 1;
+
+            let ah = file.get(prev_row, prev_col)? as f64;
+            let bh = file.get(prev_row, col)? as f64;
+            let ch = file.get(row, prev_col)? as f64;
+            let dh = file.get(row, col)? as f64;
 
             let af = file.coordinate(prev_row, prev_col);
             let bf = file.coordinate(prev_row, col);
             let cf = file.coordinate(row, prev_col);
             let df = file.coordinate(row, col);
 
-            if df.0 < bounds.0 ||
-                df.1 < bounds.1 ||
-                af.0 > bounds.2 ||
-                af.1 > bounds.3
-            {
-                continue;
-            }
+            let a = reference.coordinate(af.0, af.1, ah);
+            let b = reference.coordinate(bf.0, bf.1, bh);
+            let c = reference.coordinate(cf.0, cf.1, ch);
+            let d = reference.coordinate(df.0, df.1, dh);
 
-            if let Some(ah) = file.get(prev_row, prev_col).map(|h| h as f64) {
-                if let Some(bh) = file.get(prev_row, col).map(|h| h as f64) {
-                    if let Some(ch) = file.get(row, prev_col).map(|h| h as f64) {
-                        if let Some(dh) = file.get(row, col).map(|h| h as f64) {
-                            let a = reference.coordinate(af.0, af.1, ah);
-                            let b = reference.coordinate(bf.0, bf.1, bh);
-                            let c = reference.coordinate(cf.0, cf.1, ch);
-                            let d = reference.coordinate(df.0, df.1, dh);
+            Some((a, b, c, d))
+        };
 
-                            let rgb = |low: f64, high: f64| -> (u8, u8, u8) {
-                                let scale = (1.0 - (high - low).log2() * 0.125).max(0.125).min(1.0);
-                                if low.abs() < 1.0 && high.abs() < 1.0 {
-                                    ((0x00 as f64 * scale) as u8, (0x77 as f64 * scale) as u8, (0xBE as f64 * scale) as u8)
-                                } else {
-                                    ((0x7A as f64 * scale) as u8, (0x79 as f64 * scale) as u8, (0x4C as f64 * scale) as u8)
-                                }
-                            };
-
-                            {
-                                let low = ah.min(bh).min(ch);
-                                let high = ah.max(bh).max(ch);
-
-                                triangles.push((
-                                    a.position(),
-                                    b.position(),
-                                    c.position(),
-                                    rgb(low, high),
-                                ));
-                            }
-
-                            {
-                                let low = bh.min(ch).min(dh);
-                                let high = bh.max(ch).max(dh);
-
-                                triangles.push((
-                                    b.position(),
-                                    c.position(),
-                                    d.position(),
-                                    rgb(low, high),
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        tiles.par_extend((0..cells).into_par_iter().filter_map(cell_map));
     }
 }
 
@@ -484,11 +461,16 @@ fn hgt<'r, R: Spheroid>(file: &HgtFile, reference: &'r R, bounds: (f64, f64, f64
 fn main() {
     let mut w = Window::new_flags(-1, -1, 1024, 768, "FRIAR", &[WindowFlag::Async, WindowFlag::Resizable]).unwrap();
 
+    let hud_color = Color::rgb(0x5F, 0xFF, 0x7F);
+    let sky_color = Color::rgb(0x00, 0xBF, 0xFF);
+    let ocean_color = Color::rgb(0x1C, 0x6B, 0xA0);
+    let ground_color = Color::rgb(0x7A, 0x79, 0x4C);
+
     let _ = write!(
         WindowWriter::new(
             &mut w,
             0, 0,
-            Color::rgb(0xFF, 0xFF, 0xFF)
+            hud_color
         ),
         "Loading"
     );
@@ -497,18 +479,23 @@ fn main() {
 
     let earth = Earth;
 
-    let (center_lat, center_lon): (f64, f64) = (
-        //39.639720, -104.854705 // Cherry Creek Reservoir
-        //39.588303, -105.643829 // Mount Evans
-        //39.739230, -104.987403 // Downtown Denver
-        //40.573420, 14.297834 // Capri
-        //40.633537, 14.602547 // Amalfi
-        40.821181, 14.426308 // Mount Vesuvius
+    let (center_lat, center_lon, center_res): (f64, f64, bool) = (
+        //37.619268, -112.166357, true // Bryce Canyon
+        //39.639720, -104.854705, true // Cherry Creek Reservoir
+        39.588303, -105.643829, true // Mount Evans
+        //39.739230, -104.987403, true // Downtown Denver
+        //40.573420, 14.297834, false // Capri
+        //40.633537, 14.602547, false // Amalfi
+        //40.821181, 14.426308, false // Mount Vesuvius
     );
 
     let hgt_lat = center_lat.floor();
     let hgt_lon = center_lon.floor();
-    let hgt_res = HgtFileResolution::Three;
+    let hgt_res = if center_res {
+        HgtFileResolution::One
+    } else {
+        HgtFileResolution::Three
+    };
 
     let hgt_path = format!(
         "cache/SRTM{}/{}{:02}{}{:03}.hgt",
@@ -542,10 +529,10 @@ fn main() {
     let center = earth.coordinate(center_lat, center_lon, ground);
     let orientation = (0.0, 270.0 + 45.0, 0.0);
     let original_fov = 90.0f64;
-    let origin = center.offset(-4000.0, orientation.0, orientation.1);
+    let origin = center.offset(-2000.0, orientation.0, orientation.1);
 
-    let km_sw = origin.offset(8000.0, 225.0, 0.0);
-    let km_ne = origin.offset(8000.0, 45.0, 0.0);
+    let km_sw = origin.offset(4000.0, 225.0, 0.0);
+    let km_ne = origin.offset(4000.0, 45.0, 0.0);
 
     println!("Center: {}", center);
     println!("Origin: {}", origin);
@@ -555,7 +542,8 @@ fn main() {
     println!("NE: {}", km_ne);
     println!("OSM: {},{},{},{}", km_sw.longitude, km_sw.latitude, km_ne.longitude, km_ne.latitude);
 
-    let mut triangles_earth = vec![];
+    let mut tiles = Vec::new();
+    let mut triangles_earth = Vec::new();
     /*osm(
         "res/OSM/Denver.osm.pbf",
         //"res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf",
@@ -566,16 +554,6 @@ fn main() {
         ),
         ground
     );*/
-
-    hgt(
-        &hgt_file,
-        &earth,
-        (
-            km_sw.latitude, km_sw.longitude,
-            km_ne.latitude, km_ne.longitude,
-        ),
-        &mut triangles_earth
-    );
 
     let mut viewer = origin.duplicate();
     let mut heading = orientation.0;
@@ -603,6 +581,7 @@ fn main() {
     let mut shift = false;
 
     let mut debug = false;
+    let mut rehgt = true;
     let mut redraw = true;
     let mut redraw_times = 2;
     let mut fill = true;
@@ -717,22 +696,22 @@ fn main() {
         {
             if move_forward {
                 viewer = viewer.offset(speed, heading, 0.0);
-                redraw = true;
+                rehgt = true;
             }
 
             if move_aft {
                 viewer = viewer.offset(-speed, heading, 0.0);
-                redraw = true;
+                rehgt = true;
             }
 
             if move_left {
                 viewer = viewer.offset(-speed, heading + 90.0, 0.0);
-                redraw = true;
+                rehgt = true;
             }
 
             if move_right {
                 viewer = viewer.offset(speed, heading + 90.0, 0.0);
-                redraw = true;
+                rehgt = true;
             }
 
             if move_up {
@@ -786,6 +765,70 @@ fn main() {
             }
         }
 
+        if rehgt {
+            rehgt = false;
+
+            let horizon = 8000.0;
+            let viewer_sw = viewer.offset(horizon, 225.0, 0.0);
+            let viewer_ne = viewer.offset(horizon, 45.0, 0.0);
+
+            tiles.clear();
+            hgt(
+                &hgt_file,
+                &earth,
+                (
+                    viewer_sw.latitude, viewer_sw.longitude,
+                    viewer_ne.latitude, viewer_ne.longitude,
+                ),
+                &mut tiles
+            );
+
+            let rgb = |low: f64, high: f64| -> (u8, u8, u8) {
+                let scale = (1.0 - (high - low).log2() * 0.125).max(0.125).min(1.0);
+                let color = if low.abs() < 1.0 && high.abs() < 1.0 {
+                    ocean_color
+                } else {
+                    ground_color
+                };
+                (
+                    (color.r() as f64 * scale) as u8,
+                    (color.g() as f64 * scale) as u8,
+                    (color.b() as f64 * scale) as u8
+                )
+            };
+
+            triangles_earth.clear();
+            for tile in tiles.iter() {
+                let (a, b, c, d) = tile;
+
+                let abc = {
+                    let low = a.elevation.min(b.elevation).min(c.elevation);
+                    let high = a.elevation.max(b.elevation).max(c.elevation);
+
+                    triangles_earth.push((
+                        a.position(),
+                        b.position(),
+                        c.position(),
+                        rgb(low, high),
+                    ));
+                };
+
+                let bcd = {
+                    let low = b.elevation.min(c.elevation).min(d.elevation);
+                    let high = b.elevation.max(c.elevation).max(d.elevation);
+
+                    triangles_earth.push((
+                        b.position(),
+                        c.position(),
+                        d.position(),
+                        rgb(low, high),
+                    ));
+                };
+            }
+
+            redraw = true;
+        }
+
         if redraw {
             if redraw_times > 0 {
                 redraw_times -= 1;
@@ -806,75 +849,75 @@ fn main() {
             let w_h = w.height() as i32;
             let screen = viewport.screen(w_w as f64, w_h as f64);
 
+            let triangle_map = |(i, triangle): (usize, &(Position<Earth>, Position<Earth>, Position<Earth>, (u8, u8, u8)))| {
+                let a_earth = &triangle.0;
+                let a_ground = ground_perspective.transform(a_earth);
+                let a_screen = screen.transform(&a_ground);
+
+                let b_earth = &triangle.1;
+                let b_ground = ground_perspective.transform(b_earth);
+                let b_screen = screen.transform(&b_ground);
+
+                let c_earth = &triangle.2;
+                let c_ground = ground_perspective.transform(c_earth);
+                let c_screen = screen.transform(&c_ground);
+
+                let valid = |point: &(f64, f64, f64)| {
+                    // point.0 > 0.0 && point.0 < screen.x &&
+                    // point.1 > 0.0 && point.1 < screen.y &&
+                    point.2 > 0.01
+                };
+
+                if debug {
+                    println!("{}:", i);
+                    println!("    {}, {}, {}", a_earth, b_earth, c_earth);
+                    println!("    {}, {}, {}", a_ground, b_ground, c_ground);
+                    println!("    {:?}, {:?}, {:?}", a_screen, b_screen, c_screen);
+                }
+
+                if !valid(&a_screen) || !valid(&b_screen) || !valid(&c_screen) {
+                    return None;
+                }
+
+                let a_dist = viewer_pos.vector(&a_earth).norm() as f32;
+                let b_dist = viewer_pos.vector(&b_earth).norm() as f32;
+                let c_dist = viewer_pos.vector(&c_earth).norm() as f32;
+
+                let a = Point {
+                    x: a_screen.0 as i32,
+                    y: a_screen.1 as i32,
+                    z: 1.0 / a_dist,
+                };
+
+                let b = Point {
+                    x: b_screen.0 as i32,
+                    y: b_screen.1 as i32,
+                    z: 1.0 / b_dist,
+                };
+
+                let c = Point {
+                    x: c_screen.0 as i32,
+                    y: c_screen.1 as i32,
+                    z: 1.0 / c_dist,
+                };
+
+                let (cr, cg, cb) = (
+                    (triangle.3).0,
+                    (triangle.3).1,
+                    (triangle.3).2
+                );
+
+                Some((
+                    Triangle::new(a, b, c),
+                    Color::rgb(cr, cg, cb),
+                    i,
+                ))
+            };
+
             triangles.clear();
-            triangles.par_extend(
-                triangles_earth.par_iter().enumerate().filter_map(|(i, triangle)| {
-                    let a_earth = &triangle.0;
-                    let a_ground = ground_perspective.transform(a_earth);
-                    let a_screen = screen.transform(&a_ground);
+            triangles.par_extend(triangles_earth.par_iter().enumerate().filter_map(triangle_map));
 
-                    let b_earth = &triangle.1;
-                    let b_ground = ground_perspective.transform(b_earth);
-                    let b_screen = screen.transform(&b_ground);
-
-                    let c_earth = &triangle.2;
-                    let c_ground = ground_perspective.transform(c_earth);
-                    let c_screen = screen.transform(&c_ground);
-
-                    let valid = |point: &(f64, f64, f64)| {
-                        // point.0 > 0.0 && point.0 < screen.x &&
-                        // point.1 > 0.0 && point.1 < screen.y &&
-                        point.2 > 0.01
-                    };
-
-                    if debug {
-                        println!("{}:", i);
-                        println!("    {}, {}, {}", a_earth, b_earth, c_earth);
-                        println!("    {}, {}, {}", a_ground, b_ground, c_ground);
-                        println!("    {:?}, {:?}, {:?}", a_screen, b_screen, c_screen);
-                    }
-
-                    if !valid(&a_screen) || !valid(&b_screen) || !valid(&c_screen) {
-                        return None;
-                    }
-
-                    let a_dist = viewer_pos.vector(&a_earth).norm() as f32;
-                    let b_dist = viewer_pos.vector(&b_earth).norm() as f32;
-                    let c_dist = viewer_pos.vector(&c_earth).norm() as f32;
-
-                    let a = Point {
-                        x: a_screen.0 as i32,
-                        y: a_screen.1 as i32,
-                        z: 1.0 / a_dist,
-                    };
-
-                    let b = Point {
-                        x: b_screen.0 as i32,
-                        y: b_screen.1 as i32,
-                        z: 1.0 / b_dist,
-                    };
-
-                    let c = Point {
-                        x: c_screen.0 as i32,
-                        y: c_screen.1 as i32,
-                        z: 1.0 / c_dist,
-                    };
-
-                    let (cr, cg, cb) = (
-                        (triangle.3).0,
-                        (triangle.3).1,
-                        (triangle.3).2
-                    );
-
-                    Some((
-                        Triangle::new(a, b, c),
-                        Color::rgb(cr, cg, cb),
-                        i,
-                    ))
-                })
-            );
-
-            w.set(Color::rgb(0, 0, 0));
+            w.set(sky_color);
 
             for i in 0..z_buffer.len() {
                 z_buffer[i] = 0.0;
@@ -890,12 +933,12 @@ fn main() {
                             i
                         );
                         // let _ = write!(
-                        //     WindowWriter::new(&mut w, triangle.b.x, triangle.b.y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                        //     WindowWriter::new(&mut w, triangle.b.x, triangle.b.y, hud_color),
                         //     "{}",
                         //     i
                         // );
                         // let _ = write!(
-                        //     WindowWriter::new(&mut w, triangle.c.x, triangle.c.y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                        //     WindowWriter::new(&mut w, triangle.c.x, triangle.c.y, hud_color),
                         //     "{}",
                         //     i
                         // );
@@ -906,55 +949,55 @@ fn main() {
             }
 
             let center = (w_w/2 as i32, w_h/2 as i32);
-            w.line(center.0 - 5, center.1, center.0 + 5, center.1, Color::rgb(0xFF, 0xFF, 0xFF));
-            w.line(center.0, center.1 - 5, center.0, center.1 + 5, Color::rgb(0xFF, 0xFF, 0xFF));
+            w.line(center.0 - 5, center.1, center.0 + 5, center.1, hud_color);
+            w.line(center.0, center.1 - 5, center.0, center.1 + 5, hud_color);
 
             let mut y = 0;
 
             let _ = write!(
-                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                WindowWriter::new(&mut w, 0, y, hud_color),
                 "Coord: {}",
                 viewer
             );
             y += 16;
 
             let _ = write!(
-                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                WindowWriter::new(&mut w, 0, y, hud_color),
                 "Pos: {}",
                 viewer_pos
             );
             y += 16;
 
             let _ = write!(
-                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                WindowWriter::new(&mut w, 0, y, hud_color),
                 "Rot: {}, {}, {}",
                 heading, pitch, roll
             );
             y += 16;
 
             let _ = write!(
-                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                WindowWriter::new(&mut w, 0, y, hud_color),
                 "FOV: {}",
                 fov
             );
             y += 16;
 
             let _ = write!(
-                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                WindowWriter::new(&mut w, 0, y, hud_color),
                 "Triangles (In): {}",
                 triangles_earth.len()
             );
             y += 16;
 
             let _ = write!(
-                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                WindowWriter::new(&mut w, 0, y, hud_color),
                 "Triangles (Out): {}",
                 triangles.len()
             );
             y += 16;
 
             let _ = write!(
-                WindowWriter::new(&mut w, 0, y, Color::rgb(0xFF, 0xFF, 0xFF)),
+                WindowWriter::new(&mut w, 0, y, hud_color),
                 "FPS: {}",
                 1.0/time
             );
