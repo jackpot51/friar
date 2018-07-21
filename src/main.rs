@@ -12,6 +12,7 @@ use friar::hgt_file::{HgtFile, HgtFileResolution};
 use friar::position::Position;
 use friar::reference::Reference;
 use friar::spheroid::Spheroid;
+use friar::x_plane::XPlane;
 use orbclient::{Color, EventOption, Renderer, Window, WindowFlag};
 use osmpbfreader::{OsmPbfReader, OsmObj, Node, NodeId, Way, WayId};
 use rayon::prelude::*;
@@ -479,22 +480,33 @@ fn main() {
 
     let earth = Earth;
 
+    let mut xplane = XPlane::new("127.0.0.1", 30).unwrap();
+
+    let (xplane_lat, xplane_lon) = loop {
+        if let Some(position) = xplane.position().unwrap() {
+            break (position.latitude, position.longitude);
+        } else {
+            thread::sleep(Duration::new(0, 1000000000/1000));
+        }
+    };
+
     let (center_lat, center_lon, center_res): (f64, f64, bool) = (
         //37.619268, -112.166357, true // Bryce Canyon
         //39.639720, -104.854705, true // Cherry Creek Reservoir
-        39.588303, -105.643829, true // Mount Evans
+        //39.588303, -105.643829, true // Mount Evans
         //39.739230, -104.987403, true // Downtown Denver
         //40.573420, 14.297834, false // Capri
         //40.633537, 14.602547, false // Amalfi
         //40.821181, 14.426308, false // Mount Vesuvius
+        xplane_lat, xplane_lon, false
     );
 
     let hgt_lat = center_lat.floor();
     let hgt_lon = center_lon.floor();
     let (hgt_res, hgt_horizon) = if center_res {
-        (HgtFileResolution::One, 4000.0)
+        (HgtFileResolution::One, 8000.0)
     } else {
-        (HgtFileResolution::Three, 8000.0)
+        (HgtFileResolution::Three, 16000.0)
     };
 
     let hgt_path = format!(
@@ -765,6 +777,22 @@ fn main() {
             }
         }
 
+        while let Some(position) = xplane.position().unwrap() {
+            // println!("{:#?}", position);
+
+            viewer = earth.coordinate(
+                position.latitude,
+                position.longitude,
+                position.elevation
+            );
+
+            heading = position.heading as f64;
+            pitch = position.pitch as f64;
+            roll = -position.roll as f64;
+
+            rehgt = true;
+        }
+
         if rehgt {
             rehgt = false;
 
@@ -848,7 +876,7 @@ fn main() {
             let w_h = w.height() as i32;
             let screen = viewport.screen(w_w as f64, w_h as f64);
 
-            let triangle_map = |(i, triangle): (usize, &(Position<Earth>, Position<Earth>, Position<Earth>, (u8, u8, u8)))| {
+            let triangle_map = |triangle: &(Position<Earth>, Position<Earth>, Position<Earth>, (u8, u8, u8))| -> Option<(Triangle, Color)> {
                 let a_earth = &triangle.0;
                 let a_ground = ground_perspective.transform(a_earth);
                 let a_screen = screen.transform(&a_ground);
@@ -866,13 +894,6 @@ fn main() {
                     // point.1 > 0.0 && point.1 < screen.y &&
                     point.2 > 0.01
                 };
-
-                if debug {
-                    println!("{}:", i);
-                    println!("    {}, {}, {}", a_earth, b_earth, c_earth);
-                    println!("    {}, {}, {}", a_ground, b_ground, c_ground);
-                    println!("    {:?}, {:?}, {:?}", a_screen, b_screen, c_screen);
-                }
 
                 if !valid(&a_screen) || !valid(&b_screen) || !valid(&c_screen) {
                     return None;
@@ -909,7 +930,6 @@ fn main() {
                 Some((
                     Triangle::new(a, b, c),
                     Color::rgb(cr, cg, cb),
-                    i,
                 ))
             };
 
@@ -917,7 +937,6 @@ fn main() {
             triangles.par_extend(
                 hgt_triangles.par_iter()
                     .chain(osm_triangles.par_iter())
-                    .enumerate()
                     .filter_map(triangle_map)
             );
 
@@ -927,91 +946,149 @@ fn main() {
                 z_buffer[i] = 0.0;
             }
 
-            for (triangle, color, i) in triangles.iter() {
+            for (triangle, color) in triangles.iter() {
                 if fill {
                     triangle.fill(&mut w, &mut z_buffer, *color);
-                    if debug {
-                        let _ = write!(
-                            WindowWriter::new(&mut w, triangle.a.x, triangle.a.y, *color),
-                            "{}",
-                            i
-                        );
-                        // let _ = write!(
-                        //     WindowWriter::new(&mut w, triangle.b.x, triangle.b.y, hud_color),
-                        //     "{}",
-                        //     i
-                        // );
-                        // let _ = write!(
-                        //     WindowWriter::new(&mut w, triangle.c.x, triangle.c.y, hud_color),
-                        //     "{}",
-                        //     i
-                        // );
-                    }
                 } else {
                     triangle.draw(&mut w, *color);
                 }
             }
 
-            let center = (w_w/2 as i32, w_h/2 as i32);
-            w.line(center.0 - 5, center.1, center.0 + 5, center.1, hud_color);
-            w.line(center.0, center.1 - 5, center.0, center.1 + 5, hud_color);
+            {
+                //let vfov = fov * (w_w as f64)/(w_h as f64);
 
-            let mut y = 0;
+                let mut p = -90;
+                while p <= 90 {
+                    let p_coord = viewer.offset(1.0, heading, p as f64);
+                    let p_earth = p_coord.position();
+                    let p_ground = ground_perspective.transform(&p_earth);
+                    let p_screen = screen.transform(&p_ground);
 
-            let _ = write!(
-                WindowWriter::new(&mut w, 0, y, hud_color),
-                "Coord: {}",
-                viewer
-            );
-            y += 16;
+                    if p_screen.0 > 0.0 && p_screen.0 < screen.x &&
+                        p_screen.1 > 0.0 && p_screen.1 < screen.y &&
+                        p_screen.2 > 0.01
+                    {
+                        let size = if p == 0 {
+                            128.0
+                        } else {
+                            64.0
+                        };
 
-            let _ = write!(
-                WindowWriter::new(&mut w, 0, y, hud_color),
-                "Pos: {}",
-                viewer_pos
-            );
-            y += 16;
+                        let hole = 24.0;
 
-            let _ = write!(
-                WindowWriter::new(&mut w, 0, y, hud_color),
-                "Rot: {}, {}, {}",
-                heading, pitch, roll
-            );
-            y += 16;
+                        let r = roll.to_radians();
+                        let rc = r.cos();
+                        let rs = r.sin();
 
-            let _ = write!(
-                WindowWriter::new(&mut w, 0, y, hud_color),
-                "FOV: {}",
-                fov
-            );
-            y += 16;
+                        let dx = size * rc;
+                        let dy = size * rs;
+                        let hx = hole * rc;
+                        let hy = hole * rs;
 
-            let _ = write!(
-                WindowWriter::new(&mut w, 0, y, hud_color),
-                "Triangles (Hgt): {}",
-                hgt_triangles.len()
-            );
-            y += 16;
+                        w.wu_line(
+                            (p_screen.0 - dx).round() as i32,
+                            (p_screen.1 - dy).round() as i32,
+                            (p_screen.0 - hx).round() as i32,
+                            (p_screen.1 - hy).round() as i32,
+                            hud_color
+                        );
 
-            let _ = write!(
-                WindowWriter::new(&mut w, 0, y, hud_color),
-                "Triangles (Osm): {}",
-                osm_triangles.len()
-            );
-            y += 16;
+                        w.wu_line(
+                            (p_screen.0 + hx).round() as i32,
+                            (p_screen.1 + hy).round() as i32,
+                            (p_screen.0 + dx).round() as i32,
+                            (p_screen.1 + dy).round() as i32,
+                            hud_color
+                        );
 
-            let _ = write!(
-                WindowWriter::new(&mut w, 0, y, hud_color),
-                "Triangles (Drawn): {}",
-                triangles.len()
-            );
-            y += 16;
+                        let len = if p >= 10 {
+                            2
+                        } else if p >= 0 {
+                            1
+                        } else if p >= -9 {
+                            2
+                        } else {
+                            3
+                        };
 
-            let _ = write!(
-                WindowWriter::new(&mut w, 0, y, hud_color),
-                "FPS: {}",
-                1.0/time
-            );
+                        let _ = write!(
+                            WindowWriter::new(
+                                &mut w,
+                                (p_screen.0 as i32) - len * 4,
+                                (p_screen.1 as i32) - 8,
+                                hud_color
+                            ),
+                            "{}",
+                            p
+                        );
+                    }
+
+                    p += 5;
+                }
+
+                let center = (w_w/2 as i32, w_h/2 as i32);
+                w.line(center.0 - 5, center.1, center.0 + 5, center.1, hud_color);
+                w.line(center.0, center.1 - 5, center.0, center.1 + 5, hud_color);
+            }
+
+            if debug {
+                let mut y = 0;
+
+                let _ = write!(
+                    WindowWriter::new(&mut w, 0, y, hud_color),
+                    "Coord: {}",
+                    viewer
+                );
+                y += 16;
+
+                let _ = write!(
+                    WindowWriter::new(&mut w, 0, y, hud_color),
+                    "Pos: {}",
+                    viewer_pos
+                );
+                y += 16;
+
+                let _ = write!(
+                    WindowWriter::new(&mut w, 0, y, hud_color),
+                    "Rot: {}, {}, {}",
+                    heading, pitch, roll
+                );
+                y += 16;
+
+                let _ = write!(
+                    WindowWriter::new(&mut w, 0, y, hud_color),
+                    "FOV: {}",
+                    fov
+                );
+                y += 16;
+
+                let _ = write!(
+                    WindowWriter::new(&mut w, 0, y, hud_color),
+                    "Triangles (Hgt): {}",
+                    hgt_triangles.len()
+                );
+                y += 16;
+
+                let _ = write!(
+                    WindowWriter::new(&mut w, 0, y, hud_color),
+                    "Triangles (Osm): {}",
+                    osm_triangles.len()
+                );
+                y += 16;
+
+                let _ = write!(
+                    WindowWriter::new(&mut w, 0, y, hud_color),
+                    "Triangles (Drawn): {}",
+                    triangles.len()
+                );
+                y += 16;
+
+                let _ = write!(
+                    WindowWriter::new(&mut w, 0, y, hud_color),
+                    "FPS: {}",
+                    1.0/time
+                );
+            }
 
             w.sync();
         } else {
