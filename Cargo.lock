@@ -96,6 +96,7 @@ version = "0.1.0"
 dependencies = [
  "orbclient 0.3.16 (registry+https://github.com/rust-lang/crates.io-index)",
  "osmpbfreader 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "plain 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "polygon2 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rayon 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -240,6 +241,11 @@ dependencies = [
  "num_cpus 1.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "pub-iterator-type 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "plain"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "polygon2"
@@ -540,6 +546,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum orbclient 0.3.16 (registry+https://github.com/rust-lang/crates.io-index)" = "09b950dc49039b2ae191344ccac56de00887e62af3ac71d6346536d1d9695ff8"
 "checksum osmpbfreader 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)" = "32b3c834b42e70cc5d8b2cc7099bef59d114a39df916da611e2f9cae34cc86b5"
 "checksum par-map 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "2f05b290991702bb8140cf70915b82b0ae1ec7fe478db97305af990048040095"
+"checksum plain 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 "checksum polygon2 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c3d8e2b67e6aa528f8ba0490169f910d23646c28eb0fb20dc4b3f769b737663a"
 "checksum proc-macro2 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)" = "c65b1ea15bb859d922cade2d1765b4b88beac339cbfad545ef2d2ef8c8215ee6"
 "checksum procedural-masquerade 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "dc1bcafee1590f81acb329ae45ec627b318123f085153913620316ae9a144b2a"

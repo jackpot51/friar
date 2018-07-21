@@ -1,5 +1,7 @@
 #![feature(euclidean_division)]
 
+extern crate plain;
+
 pub mod coordinate;
 pub mod earth;
 pub mod hgt_file;
@@ -11,3 +13,4 @@ pub mod spheroid;
 pub mod vector;
 pub mod viewport;
 pub mod unit;
+pub mod x_plane;
