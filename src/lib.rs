@@ -2,6 +2,7 @@
 
 pub mod coordinate;
 pub mod earth;
+pub mod hgt_file;
 pub mod perspective;
 pub mod position;
 pub mod reference;

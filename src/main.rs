@@ -8,6 +8,7 @@ extern crate rayon;
 
 use friar::coordinate::Coordinate;
 use friar::earth::Earth;
+use friar::hgt_file::{HgtFile, HgtFileResolution};
 use friar::position::Position;
 use friar::reference::Reference;
 use friar::spheroid::Spheroid;
@@ -44,6 +45,8 @@ impl Triangle {
         if b.y > c.y {
             mem::swap(&mut b, &mut c);
         }
+
+        assert!(a.y <= b.y && b.y <= c.y);
 
         Self {
             a,
@@ -133,8 +136,9 @@ impl Triangle {
                         if z_buffer[offset] < z {
                             z_buffer[offset] = z;
 
-                            let scale = (z * 64.0).max(0.1).min(1.0);
-                            data[offset] = Color::rgb(
+                            //let scale = (z * 64.0).max(0.1).min(1.0);
+                            data[offset] = color;
+                            /*Color::rgb(
                                 // The following is to debug z-buffer
                                 // (z * 16384.0).min(255.0) as u8,
                                 // (z * 16384.0).min(255.0) as u8,
@@ -142,7 +146,7 @@ impl Triangle {
                                 (color.r() as f32 * scale) as u8,
                                 (color.g() as f32 * scale) as u8,
                                 (color.b() as f32 * scale) as u8
-                            );
+                            );*/
                         }
                     }
                 }
@@ -407,6 +411,71 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
     triangles
 }
 
+fn hgt<'r, R: Spheroid>(file: &HgtFile, reference: &'r R, bounds: (f64, f64, f64, f64), triangles: &mut Vec<(Position<'r, R>, Position<'r, R>, Position<'r, R>, (u8, u8, u8))>) {
+    let samples = file.resolution.samples();
+    for row in 2..(samples as i64) {
+        let prev_row = row - 1;
+        for col in 2..(samples as i64) {
+            let prev_col = col - 1;
+
+            let af = file.coordinate(prev_row, prev_col);
+            let bf = file.coordinate(prev_row, col);
+            let cf = file.coordinate(row, prev_col);
+            let df = file.coordinate(row, col);
+
+            if df.0 < bounds.0 ||
+                df.1 < bounds.1 ||
+                af.0 > bounds.2 ||
+                af.1 > bounds.3
+            {
+                continue;
+            }
+
+            if let Some(ah) = file.get(prev_row, prev_col).map(|h| h as f64) {
+                if let Some(bh) = file.get(prev_row, col).map(|h| h as f64) {
+                    if let Some(ch) = file.get(row, prev_col).map(|h| h as f64) {
+                        if let Some(dh) = file.get(row, col).map(|h| h as f64) {
+                            let a = reference.coordinate(af.0, af.1, ah);
+                            let b = reference.coordinate(bf.0, bf.1, bh);
+                            let c = reference.coordinate(cf.0, cf.1, ch);
+                            let d = reference.coordinate(df.0, df.1, dh);
+
+                            {
+                                let low = ah.min(bh).min(ch);
+                                let high = ah.max(bh).max(ch);
+                                let value = (255.0 - (high - low).log2() * 32.0).max(0.0).min(255.0) as u8;
+                                let rgb = (value, value, value);
+
+                                triangles.push((
+                                    a.position(),
+                                    b.position(),
+                                    c.position(),
+                                    rgb,
+                                ));
+                            }
+
+                            {
+                                let low = bh.min(ch).min(dh);
+                                let high = bh.max(ch).max(dh);
+                                let value = (255.0 - (high - low).log2() * 32.0).max(0.0).min(255.0) as u8;
+                                let rgb = (value, value, value);
+
+                                triangles.push((
+                                    b.position(),
+                                    c.position(),
+                                    d.position(),
+                                    rgb,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 fn main() {
     let mut w = Window::new_flags(-1, -1, 800, 600, "FRIAR", &[WindowFlag::Async, WindowFlag::Resizable]).unwrap();
 
@@ -423,29 +492,81 @@ fn main() {
 
     let earth = Earth;
 
-    let ground = 1600.0;
+    let (center_lat, center_lon): (f64, f64) = (
+        //39.639720, -104.854705 // Cherry Creek Reservoir
+        39.588303, -105.643829 // Mount Evans
+        //39.739230, -104.987403 // Downtown Denver
+    );
 
-    let center = earth.coordinate(39.739230, -104.987403, ground);
+    let hgt_lat = center_lat.floor();
+    let hgt_lon = center_lon.floor();
+    let hgt_res = HgtFileResolution::One;
+
+    let hgt_path = format!(
+        "cache/SRTM{}/{}{}{}{}.hgt",
+        match hgt_res {
+            HgtFileResolution::One => 1,
+            HgtFileResolution::Three => 3,
+        },
+        if hgt_lat < 0.0 {
+            "S"
+        } else {
+            "N"
+        },
+        hgt_lat.abs() as u32,
+        if hgt_lon < 0.0 {
+            "W"
+        } else {
+            "E"
+        },
+        hgt_lon.abs() as u32
+    );
+
+    println!("Loading height data from {}", hgt_path);
+    let hgt_file = HgtFile::new(hgt_path, hgt_lat, hgt_lon, hgt_res).unwrap();
+
+    let ground = {
+        let (row, col) = hgt_file.position(center_lat, center_lon);
+        let height = hgt_file.get(row, col).unwrap_or(0);
+        height as f64
+    };
+
+    let center = earth.coordinate(center_lat, center_lon, ground);
     let orientation = (0.0, 270.0 + 45.0, 0.0);
     let original_fov = 90.0f64;
-    let origin = center.offset(-400.0, orientation.0, orientation.1);
+    let origin = center.offset(-16000.0, orientation.0, orientation.1);
 
-    let km_sw = origin.offset(1000.0, 225.0, 0.0);
-    let km_ne = origin.offset(1000.0, 45.0, 0.0);
+    let km_sw = origin.offset(32000.0, 225.0, 0.0);
+    let km_ne = origin.offset(32000.0, 45.0, 0.0);
 
+    println!("Center: {}", center);
     println!("Origin: {}", origin);
+    println!("Orientation: {:?}", orientation);
+    println!("FOV: {}", original_fov);
     println!("SW: {}", km_sw);
     println!("NE: {}", km_ne);
     println!("OSM: {},{},{},{}", km_sw.longitude, km_sw.latitude, km_ne.longitude, km_ne.latitude);
 
-    let triangles_earth = osm(
-        "res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf",
+    let mut triangles_earth = vec![];
+    /*osm(
+        "res/OSM/Denver.osm.pbf",
+        //"res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf",
         &earth,
         (
             km_sw.latitude, km_sw.longitude,
             km_ne.latitude, km_ne.longitude,
         ),
         ground
+    );*/
+
+    hgt(
+        &hgt_file,
+        &earth,
+        (
+            km_sw.latitude, km_sw.longitude,
+            km_ne.latitude, km_ne.longitude,
+        ),
+        &mut triangles_earth
     );
 
     let mut viewer = origin.duplicate();
@@ -568,6 +689,7 @@ fn main() {
                         _ => (),
                     },
                     EventOption::Resize(resize_event) => {
+                        w.sync_path();
                         z_buffer = vec![0.0; (resize_event.width * resize_event.height) as usize];
                         redraw = true;
                     },
@@ -685,9 +807,9 @@ fn main() {
                     let c_screen = screen.transform(&c_ground);
 
                     let valid = |point: &(f64, f64, f64)| {
-                        point.0 > 0.0 && point.0 < screen.x &&
-                        point.1 > 0.0 && point.1 < screen.y &&
-                        point.2 > 0.0
+                        // point.0 > 0.0 && point.0 < screen.x &&
+                        // point.1 > 0.0 && point.1 < screen.y &&
+                        point.2 > 0.1
                     };
 
                     if debug {
