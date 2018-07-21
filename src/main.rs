@@ -429,10 +429,10 @@ fn hgt<'r, R: Spheroid + Sync>(file: &HgtFile, reference: &'r R, bounds: (f64, f
         let cells = rows * cols;
 
         let cell_map = |cell: i64| -> Option<(Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>)> {
-            let row = (cell / cols) + start_row;
+            let row = (cell / cols) + start_row + 1;
             let prev_row = row - 1;
 
-            let col = (cell % cols) + start_col;
+            let col = (cell % cols) + start_col + 1;
             let prev_col = col - 1;
 
             let ah = file.get(prev_row, prev_col)? as f64;
@@ -491,10 +491,10 @@ fn main() {
 
     let hgt_lat = center_lat.floor();
     let hgt_lon = center_lon.floor();
-    let hgt_res = if center_res {
-        HgtFileResolution::One
+    let (hgt_res, hgt_horizon) = if center_res {
+        (HgtFileResolution::One, 4000.0)
     } else {
-        HgtFileResolution::Three
+        (HgtFileResolution::Three, 8000.0)
     };
 
     let hgt_path = format!(
@@ -531,26 +531,26 @@ fn main() {
     let original_fov = 90.0f64;
     let origin = center.offset(-2000.0, orientation.0, orientation.1);
 
-    let km_sw = origin.offset(4000.0, 225.0, 0.0);
-    let km_ne = origin.offset(4000.0, 45.0, 0.0);
+    let osm_horizon = 1000.0;
+    let osm_sw = center.offset(osm_horizon, 225.0, 0.0);
+    let osm_ne = center.offset(osm_horizon, 45.0, 0.0);
 
     println!("Center: {}", center);
     println!("Origin: {}", origin);
     println!("Orientation: {:?}", orientation);
     println!("FOV: {}", original_fov);
-    println!("SW: {}", km_sw);
-    println!("NE: {}", km_ne);
-    println!("OSM: {},{},{},{}", km_sw.longitude, km_sw.latitude, km_ne.longitude, km_ne.latitude);
+    println!("OSM: {},{},{},{}", osm_sw.longitude, osm_sw.latitude, osm_ne.longitude, osm_ne.latitude);
 
-    let mut tiles = Vec::new();
-    let mut triangles_earth = Vec::new();
+    let mut hgt_tiles = Vec::new();
+    let mut hgt_triangles = Vec::new();
+    let osm_triangles = Vec::new();
     /*osm(
-        "res/OSM/Denver.osm.pbf",
-        //"res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf",
+        //"cache/OSM/Denver.osm.pbf",
+        "res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf",
         &earth,
         (
-            km_sw.latitude, km_sw.longitude,
-            km_ne.latitude, km_ne.longitude,
+            osm_sw.latitude, osm_sw.longitude,
+            osm_ne.latitude, osm_ne.longitude,
         ),
         ground
     );*/
@@ -586,7 +586,7 @@ fn main() {
     let mut redraw_times = 2;
     let mut fill = true;
     let mut z_buffer = vec![0.0; (w.width() * w.height()) as usize];
-    let mut triangles = Vec::with_capacity(triangles_earth.len());
+    let mut triangles = Vec::with_capacity(hgt_triangles.len() + osm_triangles.len());
 
     let mut last_instant = Instant::now();
     loop {
@@ -768,11 +768,10 @@ fn main() {
         if rehgt {
             rehgt = false;
 
-            let horizon = 8000.0;
-            let viewer_sw = viewer.offset(horizon, 225.0, 0.0);
-            let viewer_ne = viewer.offset(horizon, 45.0, 0.0);
+            let viewer_sw = viewer.offset(hgt_horizon, 225.0, 0.0);
+            let viewer_ne = viewer.offset(hgt_horizon, 45.0, 0.0);
 
-            tiles.clear();
+            hgt_tiles.clear();
             hgt(
                 &hgt_file,
                 &earth,
@@ -780,7 +779,7 @@ fn main() {
                     viewer_sw.latitude, viewer_sw.longitude,
                     viewer_ne.latitude, viewer_ne.longitude,
                 ),
-                &mut tiles
+                &mut hgt_tiles
             );
 
             let rgb = |low: f64, high: f64| -> (u8, u8, u8) {
@@ -797,15 +796,15 @@ fn main() {
                 )
             };
 
-            triangles_earth.clear();
-            for tile in tiles.iter() {
+            hgt_triangles.clear();
+            for tile in hgt_tiles.iter() {
                 let (a, b, c, d) = tile;
 
-                let abc = {
+                {
                     let low = a.elevation.min(b.elevation).min(c.elevation);
                     let high = a.elevation.max(b.elevation).max(c.elevation);
 
-                    triangles_earth.push((
+                    hgt_triangles.push((
                         a.position(),
                         b.position(),
                         c.position(),
@@ -813,11 +812,11 @@ fn main() {
                     ));
                 };
 
-                let bcd = {
+                {
                     let low = b.elevation.min(c.elevation).min(d.elevation);
                     let high = b.elevation.max(c.elevation).max(d.elevation);
 
-                    triangles_earth.push((
+                    hgt_triangles.push((
                         b.position(),
                         c.position(),
                         d.position(),
@@ -915,7 +914,12 @@ fn main() {
             };
 
             triangles.clear();
-            triangles.par_extend(triangles_earth.par_iter().enumerate().filter_map(triangle_map));
+            triangles.par_extend(
+                hgt_triangles.par_iter()
+                    .chain(osm_triangles.par_iter())
+                    .enumerate()
+                    .filter_map(triangle_map)
+            );
 
             w.set(sky_color);
 
@@ -984,14 +988,21 @@ fn main() {
 
             let _ = write!(
                 WindowWriter::new(&mut w, 0, y, hud_color),
-                "Triangles (In): {}",
-                triangles_earth.len()
+                "Triangles (Hgt): {}",
+                hgt_triangles.len()
             );
             y += 16;
 
             let _ = write!(
                 WindowWriter::new(&mut w, 0, y, hud_color),
-                "Triangles (Out): {}",
+                "Triangles (Osm): {}",
+                osm_triangles.len()
+            );
+            y += 16;
+
+            let _ = write!(
+                WindowWriter::new(&mut w, 0, y, hud_color),
+                "Triangles (Drawn): {}",
                 triangles.len()
             );
             y += 16;
