@@ -440,31 +440,36 @@ fn hgt<'r, R: Spheroid>(file: &HgtFile, reference: &'r R, bounds: (f64, f64, f64
                             let c = reference.coordinate(cf.0, cf.1, ch);
                             let d = reference.coordinate(df.0, df.1, dh);
 
+                            let rgb = |low: f64, high: f64| -> (u8, u8, u8) {
+                                let scale = (1.0 - (high - low).log2() * 0.125).max(0.125).min(1.0);
+                                if low.abs() < 1.0 && high.abs() < 1.0 {
+                                    ((0x00 as f64 * scale) as u8, (0x77 as f64 * scale) as u8, (0xBE as f64 * scale) as u8)
+                                } else {
+                                    ((0x7A as f64 * scale) as u8, (0x79 as f64 * scale) as u8, (0x4C as f64 * scale) as u8)
+                                }
+                            };
+
                             {
                                 let low = ah.min(bh).min(ch);
                                 let high = ah.max(bh).max(ch);
-                                let value = (255.0 - (high - low).log2() * 32.0).max(0.0).min(255.0) as u8;
-                                let rgb = (value, value, value);
 
                                 triangles.push((
                                     a.position(),
                                     b.position(),
                                     c.position(),
-                                    rgb,
+                                    rgb(low, high),
                                 ));
                             }
 
                             {
                                 let low = bh.min(ch).min(dh);
                                 let high = bh.max(ch).max(dh);
-                                let value = (255.0 - (high - low).log2() * 32.0).max(0.0).min(255.0) as u8;
-                                let rgb = (value, value, value);
 
                                 triangles.push((
                                     b.position(),
                                     c.position(),
                                     d.position(),
-                                    rgb,
+                                    rgb(low, high),
                                 ));
                             }
                         }
@@ -494,16 +499,17 @@ fn main() {
 
     let (center_lat, center_lon): (f64, f64) = (
         //39.639720, -104.854705 // Cherry Creek Reservoir
-        39.588303, -105.643829 // Mount Evans
+        //39.588303, -105.643829 // Mount Evans
         //39.739230, -104.987403 // Downtown Denver
+         40.573420, 14.297834
     );
 
     let hgt_lat = center_lat.floor();
     let hgt_lon = center_lon.floor();
-    let hgt_res = HgtFileResolution::One;
+    let hgt_res = HgtFileResolution::Three;
 
     let hgt_path = format!(
-        "cache/SRTM{}/{}{}{}{}.hgt",
+        "cache/SRTM{}/{}{:02}{}{:03}.hgt",
         match hgt_res {
             HgtFileResolution::One => 1,
             HgtFileResolution::Three => 3,
@@ -534,10 +540,10 @@ fn main() {
     let center = earth.coordinate(center_lat, center_lon, ground);
     let orientation = (0.0, 270.0 + 45.0, 0.0);
     let original_fov = 90.0f64;
-    let origin = center.offset(-16000.0, orientation.0, orientation.1);
+    let origin = center.offset(-2000.0, orientation.0, orientation.1);
 
-    let km_sw = origin.offset(32000.0, 225.0, 0.0);
-    let km_ne = origin.offset(32000.0, 45.0, 0.0);
+    let km_sw = origin.offset(16000.0, 225.0, 0.0);
+    let km_ne = origin.offset(16000.0, 45.0, 0.0);
 
     println!("Center: {}", center);
     println!("Origin: {}", origin);
@@ -809,7 +815,7 @@ fn main() {
                     let valid = |point: &(f64, f64, f64)| {
                         // point.0 > 0.0 && point.0 < screen.x &&
                         // point.1 > 0.0 && point.1 < screen.y &&
-                        point.2 > 0.1
+                        point.2 > 0.01
                     };
 
                     if debug {
