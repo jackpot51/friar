@@ -1162,13 +1162,21 @@ fn main() {
                         p_screen.1 > 0.0 && p_screen.1 < screen.y &&
                         p_screen.2 > 0.01
                     {
-                        let size = if p == 0 {
+                        let p_draw = if p <= 90 {
+                            p
+                        } else if p <= 270 {
+                            180 - p
+                        } else {
+                            p - 360
+                        };
+
+                        let size = if p_draw == 0 {
                             128.0
                         } else {
                             64.0
                         };
 
-                        let hole = if p == 0 {
+                        let hole = if p_draw == 0 {
                             0.0
                         } else {
                             24.0
@@ -1201,17 +1209,7 @@ fn main() {
                             hud_color
                         );
 
-                        if p != 0 {
-                            let p_draw = if p <= 90 {
-                                p
-                            } else if p <= 180 {
-                                180 - p
-                            } else if p <= 270 {
-                                180 - p
-                            } else {
-                                p - 360
-                            };
-
+                        if p_draw != 0 {
                             hud_string.clear();
                             let _ = write!(
                                 hud_string,
