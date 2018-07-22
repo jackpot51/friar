@@ -166,42 +166,106 @@ fn line_f64(window: &mut Window, ax: f64, ay: f64, bx: f64, by: f64, color: Colo
     let w_w = window.width() as i32;
     let w_h = window.height() as i32;
 
-    let slope = (by - ay) / (bx - ax);
+    let dx = bx - ax;
+    let dy = by - ay;
 
-    let start_x = cmp::max(ax.min(bx).ceil() as i32, 0);
-    let end_x = cmp::min(ax.max(bx).floor() as i32, w_w - 1);
+    if dy.abs() > dx.abs() {
+        let slope = dx / dy;
 
-    //TODO: Do endpoints, start_x - 1, end_x + 1
+        let start_y = cmp::max(ay.min(by).ceil() as i32, 0);
+        let end_y = cmp::min(ay.max(by).floor() as i32, w_h - 1);
 
-    let mut x = start_x;
-    while x <= end_x {
-        let y = ay + ((x as f64) - ax) * slope;
-        let low = y.floor();
-        let lowi = low as i32;
-        let high = y.ceil();
-        let highi = high as i32;
+        //TODO: Do endpoints, start_y - 1, end_y + 1
 
-        if lowi >= 0 && highi < w_h {
-            let low_dist = (y - low).abs();
-            window.pixel(x, lowi, Color::rgba(
-                r,
-                g,
-                b,
-                (alpha * low_dist) as u8
-            ));
+        let mut y = start_y;
+        while y <= end_y {
+            let x = ((y as f64) - ay) * slope + ax;
+            let center = x.round() as i32;
+            let low = center - 1;
+            let high = center + 1;
 
-            let high_dist = (y - high).abs();
-            window.pixel(x, highi, Color::rgba(
-                r,
-                g,
-                b,
-                (alpha * high_dist) as u8
-            ));
+            if low >= 0 && high < w_w {
+                let low_dist = (x - low as f64).abs();
+                let center_dist = (x - center as f64).abs();
+                let high_dist = (x - high as f64).abs();
+                let total_dist = low_dist + center_dist + high_dist;
+
+                let low_weight = 1.0 - low_dist / total_dist;
+                window.pixel(low, y, Color::rgba(
+                    r,
+                    g,
+                    b,
+                    (alpha * low_weight) as u8
+                ));
+
+                let center_weight = 1.0 - center_dist / total_dist;
+                window.pixel(center, y, Color::rgba(
+                    r,
+                    g,
+                    b,
+                    (alpha * center_weight) as u8
+                ));
+
+                let high_weight = 1.0 - high_dist / total_dist;
+                window.pixel(high, y, Color::rgba(
+                    r,
+                    g,
+                    b,
+                    (alpha * high_weight) as u8
+                ));
+            }
+
+            y += 1;
         }
+    } else {
+        let slope = dy / dx;
 
-        x += 1;
+        let start_x = cmp::max(ax.min(bx).ceil() as i32, 0);
+        let end_x = cmp::min(ax.max(bx).floor() as i32, w_w - 1);
+
+        //TODO: Do endpoints, start_x - 1, end_x + 1
+
+        let mut x = start_x;
+        while x <= end_x {
+            let y = ((x as f64) - ax) * slope + ay;
+            let center = y.round() as i32;
+            let low = center - 1;
+            let high = center + 1;
+
+            if low >= 0 && high < w_h {
+                let low_dist = (y - low as f64).abs();
+                let center_dist = (y - center as f64).abs();
+                let high_dist = (y - high as f64).abs();
+                let total_dist = low_dist + center_dist + high_dist;
+
+                let low_weight = 1.0 - low_dist / total_dist;
+                window.pixel(x, low, Color::rgba(
+                    r,
+                    g,
+                    b,
+                    (alpha * low_weight) as u8
+                ));
+
+                let center_weight = 1.0 - center_dist / total_dist;
+                window.pixel(x, center, Color::rgba(
+                    r,
+                    g,
+                    b,
+                    (alpha * center_weight) as u8
+                ));
+
+                let high_weight = 1.0 - high_dist / total_dist;
+                window.pixel(x, high, Color::rgba(
+                    r,
+                    g,
+                    b,
+                    (alpha * high_weight) as u8
+                ));
+            }
+
+            x += 1;
+        }
     }
-
 }
 
 struct WindowWriter<'a> {
