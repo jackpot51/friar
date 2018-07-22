@@ -1209,7 +1209,7 @@ fn main() {
                             } else if p <= 270 {
                                 180 - p
                             } else {
-                                -(360 - p)
+                                p - 360
                             };
 
                             hud_string.clear();
