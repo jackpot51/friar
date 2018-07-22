@@ -2,6 +2,7 @@
 
 extern crate friar;
 extern crate orbclient;
+extern crate orbfont;
 extern crate osmpbfreader;
 extern crate polygon2;
 extern crate rayon;
@@ -14,6 +15,7 @@ use friar::reference::Reference;
 use friar::spheroid::Spheroid;
 use friar::x_plane::XPlane;
 use orbclient::{Color, EventOption, Renderer, Window, WindowFlag};
+use orbfont::{Font, Text};
 use osmpbfreader::{OsmPbfReader, OsmObj, Node, NodeId, Way, WayId};
 use rayon::prelude::*;
 use std::{cmp, mem, thread};
@@ -157,6 +159,7 @@ impl Triangle {
 }
 
 fn line_f64(window: &mut Window, ax: f64, ay: f64, bx: f64, by: f64, color: Color) {
+    //TODO: Clean up
     //TODO: Handle overflows (when converting to i32, for example)
     let r = color.r();
     let g = color.g();
@@ -294,6 +297,33 @@ impl<'a> fmt::Write for WindowWriter<'a> {
         }
 
         Ok(())
+    }
+}
+
+struct FontCache<'a> {
+    font: &'a Font,
+    height: f32,
+    cache: HashMap<String, Text<'a>>
+}
+
+impl<'a> FontCache<'a> {
+    fn new(font: &'a Font, height: f32) -> Self {
+        Self {
+            font,
+            height,
+            cache: HashMap::new()
+        }
+    }
+
+    fn render(&mut self, string: &str) -> &Text<'a> {
+        if ! self.cache.contains_key(string) {
+            self.cache.insert(
+                string.to_string(),
+                self.font.render(string, self.height)
+            );
+        }
+
+        &self.cache[string]
     }
 }
 
@@ -579,6 +609,10 @@ fn main() {
     let ocean_color = Color::rgb(0x1C, 0x6B, 0xA0);
     let ground_color = Color::rgb(0x7A, 0x79, 0x4C);
 
+    let hud_font = Font::from_path("res/fonts/RobotoMono/RobotoMono-Regular.ttf").unwrap();
+    let mut hud_cache = FontCache::new(&hud_font, 24.0);
+    let mut hud_string = String::with_capacity(16);
+
     let _ = write!(
         WindowWriter::new(
             &mut w,
@@ -592,7 +626,7 @@ fn main() {
 
     let earth = Earth;
 
-    let mut xplane = XPlane::new("127.0.0.1", 30).unwrap();
+    /*let mut xplane = XPlane::new("192.168.1.99", 30).unwrap();
 
     let (xplane_lat, xplane_lon) = loop {
         if let Some(position) = xplane.position().unwrap() {
@@ -600,23 +634,23 @@ fn main() {
         } else {
             thread::sleep(Duration::new(0, 1000000000/1000));
         }
-    };
+    };*/
 
     let (center_lat, center_lon, center_res): (f64, f64, bool) = (
         //37.619268, -112.166357, true // Bryce Canyon
         //39.639720, -104.854705, true // Cherry Creek Reservoir
-        //39.588303, -105.643829, true // Mount Evans
+        39.588303, -105.643829, true // Mount Evans
         //39.739230, -104.987403, true // Downtown Denver
         //40.573420, 14.297834, false // Capri
         //40.633537, 14.602547, false // Amalfi
         //40.821181, 14.426308, false // Mount Vesuvius
-        xplane_lat, xplane_lon, false
+        //xplane_lat, xplane_lon, false
     );
 
     let hgt_lat = center_lat.floor();
     let hgt_lon = center_lon.floor();
     let (hgt_res, hgt_horizon) = if center_res {
-        (HgtFileResolution::One, 8000.0)
+        (HgtFileResolution::One, 4000.0)
     } else {
         (HgtFileResolution::Three, 16000.0)
     };
@@ -889,7 +923,7 @@ fn main() {
             }
         }
 
-        while let Some(position) = xplane.position().unwrap() {
+        /*while let Some(position) = xplane.position().unwrap() {
             // println!("{:#?}", position);
 
             viewer = earth.coordinate(
@@ -903,7 +937,7 @@ fn main() {
             roll = -position.roll as f64;
 
             rehgt = true;
-        }
+        }*/
 
         if rehgt {
             rehgt = false;
@@ -1098,21 +1132,19 @@ fn main() {
                             hud_color
                         );
 
-                        let len = if h >= 100 {
-                            2
-                        } else {
-                            1
-                        };
-
+                        hud_string.clear();
                         let _ = write!(
-                            WindowWriter::new(
-                                &mut w,
-                                (h_screen.0.round() as i32) - len * 4,
-                                (h_screen.1.round() as i32) - 16,
-                                hud_color
-                            ),
+                            hud_string,
                             "{}",
                             h/10
+                        );
+
+                        let text = hud_cache.render(&hud_string);
+                        text.draw(
+                            &mut w,
+                            (h_screen.0.round() as i32) - (text.width() as i32)/2,
+                            (h_screen.1.round() as i32) - (text.height() as i32),
+                            hud_color
                         );
                     }
 
@@ -1170,25 +1202,19 @@ fn main() {
                         );
 
                         if p != 0 {
-                            let len = if p >= 10 {
-                                2
-                            } else if p >= 0 {
-                                1
-                            } else if p >= -9 {
-                                2
-                            } else {
-                                3
-                            };
-
+                            hud_string.clear();
                             let _ = write!(
-                                WindowWriter::new(
-                                    &mut w,
-                                    (p_screen.0.round() as i32) - len * 4,
-                                    (p_screen.1.round() as i32) - 8,
-                                    hud_color
-                                ),
+                                hud_string,
                                 "{}",
                                 p
+                            );
+
+                            let text = hud_cache.render(&hud_string);
+                            text.draw(
+                                &mut w,
+                                (p_screen.0.round() as i32) - (text.width() as i32)/2,
+                                (p_screen.1.round() as i32) - (text.height() as i32)/2,
+                                hud_color
                             );
                         }
                     }
