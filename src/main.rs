@@ -156,6 +156,54 @@ impl Triangle {
     }
 }
 
+fn line_f64(window: &mut Window, ax: f64, ay: f64, bx: f64, by: f64, color: Color) {
+    //TODO: Handle overflows (when converting to i32, for example)
+    let r = color.r();
+    let g = color.g();
+    let b = color.b();
+    let alpha = color.a() as f64;
+
+    let w_w = window.width() as i32;
+    let w_h = window.height() as i32;
+
+    let slope = (by - ay) / (bx - ax);
+
+    let start_x = cmp::max(ax.min(bx).ceil() as i32, 0);
+    let end_x = cmp::min(ax.max(bx).floor() as i32, w_w - 1);
+
+    //TODO: Do endpoints, start_x - 1, end_x + 1
+
+    let mut x = start_x;
+    while x <= end_x {
+        let y = ay + ((x as f64) - ax) * slope;
+        let low = y.floor();
+        let lowi = low as i32;
+        let high = y.ceil();
+        let highi = high as i32;
+
+        if lowi >= 0 && highi < w_h {
+            let low_dist = (y - low).abs();
+            window.pixel(x, lowi, Color::rgba(
+                r,
+                g,
+                b,
+                (alpha * low_dist) as u8
+            ));
+
+            let high_dist = (y - high).abs();
+            window.pixel(x, highi, Color::rgba(
+                r,
+                g,
+                b,
+                (alpha * high_dist) as u8
+            ));
+        }
+
+        x += 1;
+    }
+
+}
+
 struct WindowWriter<'a> {
     window: &'a mut Window,
     x: i32,
@@ -977,11 +1025,12 @@ fn main() {
                         let dx = size * rs;
                         let dy = size * rc;
 
-                        w.wu_line(
-                            h_screen.0.round() as i32,
-                            h_screen.1.round() as i32,
-                            (h_screen.0 + dx).round() as i32,
-                            (h_screen.1 + dy).round() as i32,
+                        line_f64(
+                            &mut w,
+                            h_screen.0,
+                            h_screen.1,
+                            h_screen.0 - dx,
+                            h_screen.1 + dy,
                             hud_color
                         );
 
@@ -1038,19 +1087,21 @@ fn main() {
                         let hx = hole * rc;
                         let hy = hole * rs;
 
-                        w.wu_line(
-                            (p_screen.0 - dx).round() as i32,
-                            (p_screen.1 - dy).round() as i32,
-                            (p_screen.0 - hx).round() as i32,
-                            (p_screen.1 - hy).round() as i32,
+                        line_f64(
+                            &mut w,
+                            p_screen.0 - dx,
+                            p_screen.1 - dy,
+                            p_screen.0 - hx,
+                            p_screen.1 - hy,
                             hud_color
                         );
 
-                        w.wu_line(
-                            (p_screen.0 + hx).round() as i32,
-                            (p_screen.1 + hy).round() as i32,
-                            (p_screen.0 + dx).round() as i32,
-                            (p_screen.1 + dy).round() as i32,
+                        line_f64(
+                            &mut w,
+                            p_screen.0 + hx,
+                            p_screen.1 + hy,
+                            p_screen.0 + dx,
+                            p_screen.1 + dy,
                             hud_color
                         );
 
