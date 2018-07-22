@@ -853,12 +853,12 @@ fn main() {
 
         {
             if move_forward {
-                viewer = viewer.offset(speed, heading, 0.0);
+                viewer = viewer.offset(speed, heading, pitch);
                 rehgt = true;
             }
 
             if move_aft {
-                viewer = viewer.offset(-speed, heading, 0.0);
+                viewer = viewer.offset(-speed, heading, pitch);
                 rehgt = true;
             }
 
@@ -1151,8 +1151,8 @@ fn main() {
                     h += 10;
                 }
 
-                let mut p = -90;
-                while p <= 90 {
+                let mut p = 0;
+                while p < 360 {
                     let p_coord = viewer.offset(1.0, heading, p as f64);
                     let p_earth = p_coord.position();
                     let p_ground = ground_perspective.transform(&p_earth);
@@ -1202,11 +1202,21 @@ fn main() {
                         );
 
                         if p != 0 {
+                            let p_draw = if p <= 90 {
+                                p
+                            } else if p <= 180 {
+                                180 - p
+                            } else if p <= 270 {
+                                180 - p
+                            } else {
+                                -(360 - p)
+                            };
+
                             hud_string.clear();
                             let _ = write!(
                                 hud_string,
                                 "{}",
-                                p
+                                p_draw
                             );
 
                             let text = hud_cache.render(&hud_string);
