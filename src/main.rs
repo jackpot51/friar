@@ -685,7 +685,7 @@ fn main() {
     };
 
     let center = earth.coordinate(center_lat, center_lon, ground);
-    let orientation = (0.0f64, -45.0f64, 0.0f64);
+    let orientation = (0.0f64, -20.0f64, 0.0f64);
     let original_fov = 90.0f64;
     let origin = center.offset(-2000.0, orientation.0, orientation.1);
 
@@ -882,13 +882,8 @@ fn main() {
                 redraw = true;
             }
 
-            let roll_r = roll.to_radians();
-            let roll_c = roll_r.cos();
-            let roll_s = roll_r.sin();
-
             if rotate_left {
-                heading = (heading - speed_rot * roll_c).mod_euc(360.0);
-                pitch = (pitch - speed_rot * roll_s).mod_euc(360.0);
+                heading = (heading - speed_rot).mod_euc(360.0);
                 redraw = true;
             }
 
