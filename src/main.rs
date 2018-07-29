@@ -676,12 +676,20 @@ fn main() {
     );
 
     println!("Loading height data from {}", hgt_path);
-    let hgt_file = HgtFile::new(hgt_path, hgt_lat, hgt_lon, hgt_res).unwrap();
+    let hgt_file_opt = match HgtFile::new(&hgt_path, hgt_lat, hgt_lon, hgt_res) {
+        Ok(ok) => Some(ok),
+        Err(err) => {
+            println!("Failed to load height data from {}: {}", hgt_path, err);
+            None
+        }
+    };
 
-    let ground = {
+    let ground = if let Some(ref hgt_file) = hgt_file_opt {
         let (row, col) = hgt_file.position(center_lat, center_lon);
         let height = hgt_file.get(row, col).unwrap_or(0);
         height as f64
+    } else {
+        0.0f64
     };
 
     let center = earth.coordinate(center_lat, center_lon, ground);
@@ -948,15 +956,17 @@ fn main() {
             let viewer_ne = viewer.offset(hgt_horizon, 45.0, 0.0);
 
             hgt_tiles.clear();
-            hgt(
-                &hgt_file,
-                &earth,
-                (
-                    viewer_sw.latitude, viewer_sw.longitude,
-                    viewer_ne.latitude, viewer_ne.longitude,
-                ),
-                &mut hgt_tiles
-            );
+            if let Some(ref hgt_file) = hgt_file_opt {
+                hgt(
+                    &hgt_file,
+                    &earth,
+                    (
+                        viewer_sw.latitude, viewer_sw.longitude,
+                        viewer_ne.latitude, viewer_ne.longitude,
+                    ),
+                    &mut hgt_tiles
+                );
+            }
 
             let rgb = |low: f64, high: f64| -> (u8, u8, u8) {
                 let scale = 1.0; //(1.0 - (high - low).log2() * 0.125).max(0.125).min(1.0);
