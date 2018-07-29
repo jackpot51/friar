@@ -22,7 +22,7 @@ impl HgtFileResolution {
     }
 
     /// Return samples for each axis in the file
-    pub fn samples(&self) -> u32 {
+    pub fn samples(&self) -> u16 {
         match *self {
             HgtFileResolution::One => 3601,
             HgtFileResolution::Three => 1201,
@@ -47,19 +47,19 @@ impl HgtFile {
     pub fn new<P: AsRef<Path>>(path: P, latitude: f64, longitude: f64, resolution: HgtFileResolution) -> io::Result<Self> {
         let mut file = File::open(path.as_ref())?;
 
-        let expected_len = (resolution.samples() as u64).pow(2) * 2;
+        let expected_len = (resolution.samples() as usize).pow(2) * 2;
 
         let metadata = file.metadata()?;
         let len = metadata.len();
-        if len != expected_len {
+        if len != expected_len as u64 {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 format!("HgtFile: {}: size of {} is not equal to {}", path.as_ref().display(), len, expected_len)
             ));
         }
 
-        let mut data = Vec::with_capacity(len as usize);
-        let read_len = file.read_to_end(&mut data)? as u64;
+        let mut data = Vec::with_capacity(expected_len);
+        let read_len = file.read_to_end(&mut data)?;
         if read_len != expected_len {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -75,11 +75,28 @@ impl HgtFile {
         })
     }
 
+    pub fn empty(latitude: f64, longitude: f64, resolution: HgtFileResolution) -> Self {
+        let len = (resolution.samples() as usize).pow(2) * 2;
+
+        let mut data = Vec::with_capacity(len);
+
+        for _i in 0..len {
+            data.push(0);
+        }
+
+        Self {
+            latitude,
+            longitude,
+            resolution,
+            data: data.into_boxed_slice()
+        }
+    }
+
     /// Get the height in meters at a file position
-    pub fn get(&self, row: i64, col: i64) -> Option<i16> {
-        let samples = self.resolution.samples() as i64;
+    pub fn get(&self, row: u16, col: u16) -> Option<i16> {
+        let samples = self.resolution.samples();
         if row > 0 && row < samples && col > 0 && col < samples {
-            let offset = (((samples - row - 1) * samples + (col - 1)) * 2) as usize;
+            let offset = (((samples - row - 1) as usize) * (samples as usize) + ((col - 1) as usize)) * 2;
 
             let high = self.data[offset];
             let low = self.data[offset + 1];
@@ -98,20 +115,30 @@ impl HgtFile {
     }
 
     /// Produce row and column from latitude and longitude
-    pub fn position(&self, latitude: f64, longitude: f64) -> (i64, i64) {
+    pub fn position(&self, latitude: f64, longitude: f64) -> Option<(u16, u16)> {
         let res = self.resolution.degrees();
-        let row = (latitude - self.latitude) / res;
-        let col = (longitude - self.longitude) / res;
+        let row = ((latitude - self.latitude) / res).round() as i64;
+        let col = ((longitude - self.longitude) / res).round() as i64;
 
-        (row.round() as i64, col.round() as i64)
+        let samples = self.resolution.samples() as i64;
+        if row > 0 && row < samples && col > 0 && col < samples {
+            Some((row as u16, col as u16))
+        } else {
+            None
+        }
     }
 
     /// Produce latitude and longitude from row and column
-    pub fn coordinate(&self, row: i64, col: i64) -> (f64, f64) {
-        let res = self.resolution.degrees();
-        let latitude = (row as f64) * res + self.latitude;
-        let longitude = (col as f64) * res + self.longitude;
+    pub fn coordinate(&self, row: u16, col: u16) -> Option<(f64, f64)> {
+        let samples = self.resolution.samples();
+        if row > 0 && row < samples && col > 0 && col < samples {
+            let res = self.resolution.degrees();
+            let latitude = (row as f64) * res + self.latitude;
+            let longitude = (col as f64) * res + self.longitude;
 
-        (latitude, longitude)
+            Some((latitude, longitude))
+        } else {
+            None
+        }
     }
 }

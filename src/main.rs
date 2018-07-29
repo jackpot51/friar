@@ -22,6 +22,7 @@ use std::{cmp, mem, thread};
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use std::fs::File;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy)]
@@ -555,10 +556,10 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
 }
 
 fn hgt<'r, R: Spheroid + Sync>(file: &HgtFile, reference: &'r R, bounds: (f64, f64, f64, f64), tiles: &mut Vec<(Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>)>) {
-    let samples = file.resolution.samples() as i64;
+    let samples = file.resolution.samples();
 
-    let start = file.position(bounds.0, bounds.1);
-    let end = file.position(bounds.2, bounds.3);
+    let start = file.position(bounds.0, bounds.1).unwrap_or((0, 0));
+    let end = file.position(bounds.2, bounds.3).unwrap_or((samples, samples));
 
     let start_row = cmp::max(1, start.0);
     let start_col = cmp::max(1, start.1);
@@ -569,13 +570,13 @@ fn hgt<'r, R: Spheroid + Sync>(file: &HgtFile, reference: &'r R, bounds: (f64, f
         let rows = end_row - (start_row + 1);
         let cols = end_col - (start_col + 1);
 
-        let cells = rows * cols;
+        let cells = (rows as u32) * (cols as u32);
 
-        let cell_map = |cell: i64| -> Option<(Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>)> {
-            let row = (cell / cols) + start_row + 1;
+        let cell_map = |cell: u32| -> Option<(Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>)> {
+            let row = ((cell / (cols as u32)) as u16) + start_row + 1;
             let prev_row = row - 1;
 
-            let col = (cell % cols) + start_col + 1;
+            let col = ((cell % (cols as u32)) as u16) + start_col + 1;
             let prev_col = col - 1;
 
             let ah = file.get(prev_row, prev_col)? as f64;
@@ -583,10 +584,10 @@ fn hgt<'r, R: Spheroid + Sync>(file: &HgtFile, reference: &'r R, bounds: (f64, f
             let ch = file.get(row, prev_col)? as f64;
             let dh = file.get(row, col)? as f64;
 
-            let af = file.coordinate(prev_row, prev_col);
-            let bf = file.coordinate(prev_row, col);
-            let cf = file.coordinate(row, prev_col);
-            let df = file.coordinate(row, col);
+            let af = file.coordinate(prev_row, prev_col)?;
+            let bf = file.coordinate(prev_row, col)?;
+            let cf = file.coordinate(row, prev_col)?;
+            let df = file.coordinate(row, col)?;
 
             let a = reference.coordinate(af.0, af.1, ah);
             let b = reference.coordinate(bf.0, bf.1, bh);
@@ -676,20 +677,19 @@ fn main() {
     );
 
     println!("Loading height data from {}", hgt_path);
-    let hgt_file_opt = match HgtFile::new(&hgt_path, hgt_lat, hgt_lon, hgt_res) {
-        Ok(ok) => Some(ok),
-        Err(err) => {
-            println!("Failed to load height data from {}: {}", hgt_path, err);
-            None
-        }
+    let hgt_file = if Path::new(&hgt_path).exists() {
+        HgtFile::new(&hgt_path, hgt_lat, hgt_lon, hgt_res).unwrap()
+    } else {
+        println!("Failed to find height data file {}", hgt_path);
+        HgtFile::empty(hgt_lat, hgt_lon, hgt_res)
     };
 
-    let ground = if let Some(ref hgt_file) = hgt_file_opt {
-        let (row, col) = hgt_file.position(center_lat, center_lon);
-        let height = hgt_file.get(row, col).unwrap_or(0);
-        height as f64
-    } else {
-        0.0f64
+    let ground = {
+        if let Some((row, col)) = hgt_file.position(center_lat, center_lon) {
+            hgt_file.get(row, col).unwrap_or(0) as f64
+        } else {
+            0.0f64
+        }
     };
 
     let center = earth.coordinate(center_lat, center_lon, ground);
@@ -956,17 +956,15 @@ fn main() {
             let viewer_ne = viewer.offset(hgt_horizon, 45.0, 0.0);
 
             hgt_tiles.clear();
-            if let Some(ref hgt_file) = hgt_file_opt {
-                hgt(
-                    &hgt_file,
-                    &earth,
-                    (
-                        viewer_sw.latitude, viewer_sw.longitude,
-                        viewer_ne.latitude, viewer_ne.longitude,
-                    ),
-                    &mut hgt_tiles
-                );
-            }
+            hgt(
+                &hgt_file,
+                &earth,
+                (
+                    viewer_sw.latitude, viewer_sw.longitude,
+                    viewer_ne.latitude, viewer_ne.longitude,
+                ),
+                &mut hgt_tiles
+            );
 
             let rgb = |low: f64, high: f64| -> (u8, u8, u8) {
                 let scale = 1.0; //(1.0 - (high - low).log2() * 0.125).max(0.125).min(1.0);
