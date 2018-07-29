@@ -10,6 +10,7 @@ extern crate rayon;
 use friar::coordinate::Coordinate;
 use friar::earth::Earth;
 use friar::hgt_file::{HgtFile, HgtFileResolution};
+use friar::hgt_srtm::{HgtSrtm};
 use friar::position::Position;
 use friar::reference::Reference;
 use friar::spheroid::Spheroid;
@@ -22,7 +23,6 @@ use std::{cmp, mem, thread};
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use std::fs::File;
-use std::path::Path;
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy)]
@@ -627,26 +627,28 @@ fn main() {
 
     let earth = Earth;
 
-    // let mut xplane = XPlane::new("127.0.0.1", 30).unwrap();
-    //
-    // let (xplane_lat, xplane_lon) = loop {
-    //     if let Some(position) = xplane.position().unwrap() {
-    //         break (position.latitude, position.longitude);
-    //     } else {
-    //         thread::sleep(Duration::new(0, 1000000000/1000));
-    //     }
-    // };
+    let mut xplane_opt: Option<XPlane> = None;
+    // Some(XPlane::new("127.0.0.1", 30).unwrap());
 
-    let (center_lat, center_lon, center_res): (f64, f64, bool) = (
-        37.619268, -112.166357, true // Bryce Canyon
-        //39.639720, -104.854705, true // Cherry Creek Reservoir
-        //39.588303, -105.643829, true // Mount Evans
-        //39.739230, -104.987403, true // Downtown Denver
-        //40.573420, 14.297834, false // Capri
-        //40.633537, 14.602547, false // Amalfi
-        //40.821181, 14.426308, false // Mount Vesuvius
-        //xplane_lat, xplane_lon, false
-    );
+    let (center_lat, center_lon, center_res): (f64, f64, bool) = if let Some(ref mut xplane) = xplane_opt {
+        loop {
+            if let Some(position) = xplane.position().unwrap() {
+                break (position.latitude, position.longitude, false);
+            } else {
+                thread::sleep(Duration::new(0, 1000000000/1000));
+            }
+        }
+    } else {
+        (
+            //37.619268, -112.166357, true // Bryce Canyon
+            //39.639720, -104.854705, true // Cherry Creek Reservoir
+            39.588303, -105.643829, true // Mount Evans
+            //39.739230, -104.987403, true // Downtown Denver
+            //40.573420, 14.297834, false // Capri
+            //40.633537, 14.602547, false // Amalfi
+            //40.821181, 14.426308, false // Mount Vesuvius
+        )
+    };
 
     let hgt_lat = center_lat.floor();
     let hgt_lon = center_lon.floor();
@@ -656,33 +658,9 @@ fn main() {
         (HgtFileResolution::Three, 32000.0)
     };
 
-    let hgt_path = format!(
-        "cache/SRTM{}/{}{:02}{}{:03}.hgt",
-        match hgt_res {
-            HgtFileResolution::One => 1,
-            HgtFileResolution::Three => 3,
-        },
-        if hgt_lat < 0.0 {
-            "S"
-        } else {
-            "N"
-        },
-        hgt_lat.abs() as u32,
-        if hgt_lon < 0.0 {
-            "W"
-        } else {
-            "E"
-        },
-        hgt_lon.abs() as u32
-    );
+    let hgt_srtm = HgtSrtm::new("cache");
 
-    println!("Loading height data from {}", hgt_path);
-    let hgt_file = if Path::new(&hgt_path).exists() {
-        HgtFile::new(&hgt_path, hgt_lat, hgt_lon, hgt_res).unwrap()
-    } else {
-        println!("Failed to find height data file {}", hgt_path);
-        HgtFile::empty(hgt_lat, hgt_lon, hgt_res)
-    };
+    let hgt_file = hgt_srtm.get(hgt_lat, hgt_lon, hgt_res).unwrap();
 
     let ground = {
         if let Some((row, col)) = hgt_file.position(center_lat, center_lon) {
@@ -931,21 +909,23 @@ fn main() {
             }
         }
 
-        // while let Some(position) = xplane.position().unwrap() {
-        //     // println!("{:#?}", position);
-        //
-        //     viewer = earth.coordinate(
-        //         position.latitude,
-        //         position.longitude,
-        //         position.elevation
-        //     );
-        //
-        //     heading = position.heading as f64;
-        //     pitch = position.pitch as f64;
-        //     roll = -position.roll as f64;
-        //
-        //     rehgt = true;
-        // }
+        if let Some(ref mut xplane) = xplane_opt {
+            while let Some(position) = xplane.position().unwrap() {
+                // println!("{:#?}", position);
+
+                viewer = earth.coordinate(
+                    position.latitude,
+                    position.longitude,
+                    position.elevation
+                );
+
+                heading = position.heading as f64;
+                pitch = position.pitch as f64;
+                roll = -position.roll as f64;
+
+                rehgt = true;
+            }
+        }
 
         let viewer_pos = viewer.position();
 

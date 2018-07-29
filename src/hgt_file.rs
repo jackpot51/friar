@@ -43,27 +43,12 @@ pub struct HgtFile {
 }
 
 impl HgtFile {
-    /// Creates a new HgtFile from a path, origin in latitude and longitude, and resolution in arc-seconds
-    pub fn new<P: AsRef<Path>>(path: P, latitude: f64, longitude: f64, resolution: HgtFileResolution) -> io::Result<Self> {
-        let mut file = File::open(path.as_ref())?;
-
+    pub fn new(latitude: f64, longitude: f64, resolution: HgtFileResolution, data: Box<[u8]>) -> io::Result<Self> {
         let expected_len = (resolution.samples() as usize).pow(2) * 2;
-
-        let metadata = file.metadata()?;
-        let len = metadata.len();
-        if len != expected_len as u64 {
+        if data.len() != expected_len {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("HgtFile: {}: size of {} is not equal to {}", path.as_ref().display(), len, expected_len)
-            ));
-        }
-
-        let mut data = Vec::with_capacity(expected_len);
-        let read_len = file.read_to_end(&mut data)?;
-        if read_len != expected_len {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("HgtFile: {}: read of {} is not equal to {}", path.as_ref().display(), len, expected_len)
+                format!("HgtFile: data size of {} is not equal to {}", data.len(), expected_len)
             ));
         }
 
@@ -71,24 +56,46 @@ impl HgtFile {
             latitude,
             longitude,
             resolution,
-            data: data.into_boxed_slice()
+            data: data
         })
     }
 
-    pub fn empty(latitude: f64, longitude: f64, resolution: HgtFileResolution) -> Self {
-        let len = (resolution.samples() as usize).pow(2) * 2;
+    /// Creates a new HgtFile from a path, origin in latitude and longitude, and resolution in arc-seconds
+    pub fn from_path<P: AsRef<Path>>(latitude: f64, longitude: f64, resolution: HgtFileResolution, path: P) -> io::Result<Self> {
+        let data = {
+            let mut file = File::open(path.as_ref())?;
+            let metadata = file.metadata()?;
+            let mut data = Vec::with_capacity(metadata.len() as usize);
+            file.read_to_end(&mut data)?;
+            data.into_boxed_slice()
+        };
 
-        let mut data = Vec::with_capacity(len);
+        Ok(Self {
+            latitude,
+            longitude,
+            resolution,
+            data
+        })
+    }
 
-        for _i in 0..len {
-            data.push(0);
-        }
+    pub fn from_value(latitude: f64, longitude: f64, resolution: HgtFileResolution, value: i16) -> Self {
+        let data = {
+            let high = (value >> 8) as u8;
+            let low = value as u8;
+            let len = (resolution.samples() as usize).pow(2) * 2;
+            let mut data = Vec::with_capacity(len);
+            for _i in 0..len/2 {
+                data.push(high);
+                data.push(low);
+            }
+            data.into_boxed_slice()
+        };
 
         Self {
             latitude,
             longitude,
             resolution,
-            data: data.into_boxed_slice()
+            data
         }
     }
 
