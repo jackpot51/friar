@@ -2,34 +2,7 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
-pub enum HgtFileResolution {
-    /// One arc-second resolution
-    One,
-    /// Three arc-second resolution
-    Three,
-    // Thirty arc-second resolution
-    //TODO Thirty,
-}
-
-impl HgtFileResolution {
-    /// Return resolution in degrees
-    pub fn degrees(&self) -> f64 {
-        match *self {
-            HgtFileResolution::One => 1.0 / 3600.0,
-            HgtFileResolution::Three => 3.0 / 3600.0,
-            //TODO HgtFileResolution::Thirty => 30.0 / 3600.0,
-        }
-    }
-
-    /// Return samples for each axis in the file
-    pub fn samples(&self) -> u16 {
-        match *self {
-            HgtFileResolution::One => 3601,
-            HgtFileResolution::Three => 1201,
-            //TODO HgtFileResolution::Thirty => 121,
-        }
-    }
-}
+use hgt::HgtResolution;
 
 pub struct HgtFile {
     /// Identifies the southmost latitude
@@ -37,13 +10,13 @@ pub struct HgtFile {
     /// Identifies the westmost longitude
     pub longitude: f64,
     /// Identifies the resolution of the file
-    pub resolution: HgtFileResolution,
+    pub resolution: HgtResolution,
     /// Data loaded from file
     pub data: Box<[u8]>
 }
 
 impl HgtFile {
-    pub fn new(latitude: f64, longitude: f64, resolution: HgtFileResolution, data: Box<[u8]>) -> io::Result<Self> {
+    pub fn new(latitude: f64, longitude: f64, resolution: HgtResolution, data: Box<[u8]>) -> io::Result<Self> {
         let expected_len = (resolution.samples() as usize).pow(2) * 2;
         if data.len() != expected_len {
             return Err(io::Error::new(
@@ -61,7 +34,7 @@ impl HgtFile {
     }
 
     /// Creates a new HgtFile from a path, origin in latitude and longitude, and resolution in arc-seconds
-    pub fn from_path<P: AsRef<Path>>(latitude: f64, longitude: f64, resolution: HgtFileResolution, path: P) -> io::Result<Self> {
+    pub fn from_path<P: AsRef<Path>>(latitude: f64, longitude: f64, resolution: HgtResolution, path: P) -> io::Result<Self> {
         let data = {
             let mut file = File::open(path.as_ref())?;
             let metadata = file.metadata()?;
@@ -78,7 +51,7 @@ impl HgtFile {
         })
     }
 
-    pub fn from_value(latitude: f64, longitude: f64, resolution: HgtFileResolution, value: i16) -> Self {
+    pub fn from_value(latitude: f64, longitude: f64, resolution: HgtResolution, value: i16) -> Self {
         let data = {
             let high = (value >> 8) as u8;
             let low = value as u8;

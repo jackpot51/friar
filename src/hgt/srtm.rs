@@ -1,9 +1,8 @@
 use reqwest;
 use std::io::{self, Cursor, Read};
-use std::path::{Path, PathBuf};
 use zip;
 
-use hgt_file::{HgtFile, HgtFileResolution};
+use hgt::{HgtFile, HgtResolution};
 
 static SRTM_URL: &'static str = "https://dds.cr.usgs.gov/srtm/version2_1";
 
@@ -26,18 +25,10 @@ static SRTM3_DIRS: [&'static str; 6] = [
     "South_America",
 ];
 
-pub struct HgtSrtm {
-    path: PathBuf,
-}
+pub struct HgtSrtm;
 
 impl HgtSrtm {
-    pub fn new<P: AsRef<Path>>(path: P) -> Self {
-        Self {
-            path: path.as_ref().to_owned()
-        }
-    }
-
-    pub fn get(&self, latitude: f64, longitude: f64, resolution: HgtFileResolution) -> io::Result<HgtFile> {
+    pub fn get(latitude: f64, longitude: f64, resolution: HgtResolution) -> io::Result<HgtFile> {
         let name = format!(
             "{}{:02}{}{:03}",
             if latitude < 0.0 {
@@ -55,20 +46,9 @@ impl HgtSrtm {
         );
 
         let (root, dirs): (&str, &[&str]) = match resolution {
-            HgtFileResolution::One => ("SRTM1", &SRTM1_DIRS),
-            HgtFileResolution::Three => ("SRTM3", &SRTM3_DIRS),
+            HgtResolution::One => ("SRTM1", &SRTM1_DIRS),
+            HgtResolution::Three => ("SRTM3", &SRTM3_DIRS),
         };
-
-        let path = {
-            let mut path = self.path.clone();
-            path.push(root);
-            path.push(&format!("{}.hgt", name));
-            path
-        };
-
-        if path.exists() {
-            return HgtFile::from_path(latitude, longitude, resolution, path);
-        }
 
         let reqwest_err = |err| {
             io::Error::new(
@@ -112,6 +92,9 @@ impl HgtSrtm {
             }
         }
 
-        panic!("todo: download a file for {}", name);
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("HgtSrtm: failed to find {} in {}", name, root)
+        ))
     }
 }

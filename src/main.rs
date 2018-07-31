@@ -9,8 +9,7 @@ extern crate rayon;
 
 use friar::coordinate::Coordinate;
 use friar::earth::Earth;
-use friar::hgt_file::{HgtFile, HgtFileResolution};
-use friar::hgt_srtm::{HgtSrtm};
+use friar::hgt::{HgtCache, HgtFile, HgtResolution};
 use friar::position::Position;
 use friar::reference::Reference;
 use friar::spheroid::Spheroid;
@@ -24,6 +23,36 @@ use std::collections::HashMap;
 use std::fmt::{self, Write};
 use std::fs::File;
 use std::time::{Duration, Instant};
+
+struct Timer {
+    name: &'static str,
+    print: bool,
+    instant: Instant,
+}
+
+impl Timer {
+    fn new(name: &'static str, print: bool) -> Self {
+        let instant = Instant::now();
+        Self {
+            name,
+            print,
+            instant,
+        }
+    }
+}
+
+impl Drop for Timer {
+    fn drop(&mut self) {
+        if self.print {
+            let duration = self.instant.elapsed();
+            println!(
+                "{}: {}",
+                self.name,
+                (duration.as_secs() as f64) + (duration.subsec_nanos() as f64)/1000000000.0
+            );
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 struct Point {
@@ -558,8 +587,11 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
 fn hgt<'r, R: Spheroid + Sync>(file: &HgtFile, reference: &'r R, bounds: (f64, f64, f64, f64), tiles: &mut Vec<(Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>)>) {
     let samples = file.resolution.samples();
 
-    let start = file.position(bounds.0, bounds.1).unwrap_or((0, 0));
-    let end = file.position(bounds.2, bounds.3).unwrap_or((samples, samples));
+    let min = file.coordinate(1, 1).unwrap();
+    let max = file.coordinate(samples - 1, samples - 1).unwrap();
+
+    let start = file.position(bounds.0.min(max.0).max(min.0), bounds.1.min(max.1).max(min.1)).unwrap();
+    let end = file.position(bounds.2.min(max.0).max(min.0), bounds.3.min(max.1).max(min.1)).unwrap();
 
     let start_row = cmp::max(1, start.0);
     let start_col = cmp::max(1, start.1);
@@ -599,6 +631,18 @@ fn hgt<'r, R: Spheroid + Sync>(file: &HgtFile, reference: &'r R, bounds: (f64, f
 
         tiles.par_extend((0..cells).into_par_iter().filter_map(cell_map));
     }
+}
+
+fn hgt_nearby_files(cache: &HgtCache, latitude: f64, longitude: f64, res: HgtResolution) -> [HgtFile; 5] {
+    let f = latitude.floor();
+    let l = longitude.floor();
+    [
+        cache.get(f, l, res).unwrap(),
+        cache.get(f - 1.0, l, res).unwrap(),
+        cache.get(f, l - 1.0, res).unwrap(),
+        cache.get(f + 1.0, l, res).unwrap(),
+        cache.get(f, l + 1.0, res).unwrap(),
+    ]
 }
 
 
@@ -642,7 +686,8 @@ fn main() {
         (
             //37.619268, -112.166357, true // Bryce Canyon
             //39.639720, -104.854705, true // Cherry Creek Reservoir
-            39.588303, -105.643829, true // Mount Evans
+            //39.588303, -105.643829, true // Mount Evans
+            39.610061, -106.056893, true // Dillon Reservoir
             //39.739230, -104.987403, true // Downtown Denver
             //40.573420, 14.297834, false // Capri
             //40.633537, 14.602547, false // Amalfi
@@ -650,28 +695,28 @@ fn main() {
         )
     };
 
-    let hgt_lat = center_lat.floor();
-    let hgt_lon = center_lon.floor();
     let (hgt_res, hgt_horizon) = if center_res {
-        (HgtFileResolution::One, 4000.0)
+        (HgtResolution::One, 4000.0)
     } else {
-        (HgtFileResolution::Three, 32000.0)
+        (HgtResolution::Three, 32000.0)
     };
 
-    let hgt_srtm = HgtSrtm::new("cache");
+    let hgt_cache = HgtCache::new("cache");
 
-    let hgt_file = hgt_srtm.get(hgt_lat, hgt_lon, hgt_res).unwrap();
+    let mut hgt_files = hgt_nearby_files(&hgt_cache, center_lat, center_lon, hgt_res);
 
-    let ground = {
+    let ground = if let Some(hgt_file) = hgt_files.get(0) {
         if let Some((row, col)) = hgt_file.position(center_lat, center_lon) {
             hgt_file.get(row, col).unwrap_or(0) as f64
         } else {
             0.0f64
         }
+    } else {
+        0.0f64
     };
 
     let center = earth.coordinate(center_lat, center_lon, ground);
-    let orientation = (0.0f64, -20.0f64, 0.0f64);
+    let orientation = (90.0f64, -20.0f64, 0.0f64);
     let original_fov = 90.0f64;
     let origin = center.offset(-2000.0, orientation.0, orientation.1);
 
@@ -910,6 +955,7 @@ fn main() {
         }
 
         if let Some(ref mut xplane) = xplane_opt {
+            Timer::new("xplane", debug);
             while let Some(position) = xplane.position().unwrap() {
                 // println!("{:#?}", position);
 
@@ -930,21 +976,35 @@ fn main() {
         let viewer_pos = viewer.position();
 
         if rehgt {
+            let timer = Timer::new("hgt", debug);
+
             rehgt = false;
 
             let viewer_sw = viewer.offset(hgt_horizon, 225.0, 0.0);
             let viewer_ne = viewer.offset(hgt_horizon, 45.0, 0.0);
 
+            let reload_hgt_files = if let Some(hgt_file) = hgt_files.get(0) {
+                hgt_file.position(viewer.latitude, viewer.longitude).is_none()
+            } else {
+                false
+            };
+
+            if reload_hgt_files {
+                hgt_files = hgt_nearby_files(&hgt_cache, viewer.latitude, viewer.longitude, hgt_res);
+            }
+
             hgt_tiles.clear();
-            hgt(
-                &hgt_file,
-                &earth,
-                (
-                    viewer_sw.latitude, viewer_sw.longitude,
-                    viewer_ne.latitude, viewer_ne.longitude,
-                ),
-                &mut hgt_tiles
-            );
+            for hgt_file in hgt_files.iter() {
+                hgt(
+                    &hgt_file,
+                    &earth,
+                    (
+                        viewer_sw.latitude, viewer_sw.longitude,
+                        viewer_ne.latitude, viewer_ne.longitude,
+                    ),
+                    &mut hgt_tiles
+                );
+            }
 
             let rgb = |low: f64, high: f64| -> (u8, u8, u8) {
                 let scale = 1.0; //(1.0 - (high - low).log2() * 0.125).max(0.125).min(1.0);
@@ -1021,9 +1081,13 @@ fn main() {
             }
 
             redraw = true;
+
+            drop(timer);
         }
 
         if redraw {
+            let timer = Timer::new("draw", debug);
+
             if redraw_times > 0 {
                 redraw_times -= 1;
             } else {
@@ -1322,6 +1386,8 @@ fn main() {
             }
 
             w.sync();
+
+            drop(timer);
         } else {
             thread::sleep(Duration::new(0, 1000000000/1000));
         }

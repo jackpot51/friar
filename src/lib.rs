@@ -6,8 +6,7 @@ extern crate zip;
 
 pub mod coordinate;
 pub mod earth;
-pub mod hgt_file;
-pub mod hgt_srtm;
+pub mod hgt;
 pub mod perspective;
 pub mod position;
 pub mod reference;
