@@ -34,7 +34,7 @@ impl<'r, R: Reference> Viewport<'r, R> {
         (bx, by, bz)
     }
 
-    pub fn screen(&'r self, x: f64, y: f64) -> Screen<'r, R> {
-        Screen::new(self, x, y)
+    pub fn screen(&'r self, x: f64, y: f64, theta: f64) -> Screen<'r, R> {
+        Screen::new(self, x, y, theta)
     }
 }

@@ -878,12 +878,12 @@ fn main() {
                         orbclient::K_K => {
                             rotate_up = key_event.pressed;
                         },
-                        // orbclient::K_U => {
-                        //     roll_left = key_event.pressed;
-                        // },
-                        // orbclient::K_O => {
-                        //     roll_right = key_event.pressed;
-                        // },
+                        orbclient::K_U => {
+                            roll_left = key_event.pressed;
+                        },
+                        orbclient::K_O => {
+                            roll_right = key_event.pressed;
+                        },
                         orbclient::K_P if key_event.pressed => {
                             heading = orientation.0;
                             pitch = orientation.1;
@@ -1026,11 +1026,18 @@ fn main() {
 
                 let x = (2.0 * ((mouse_x as f64) / w_w) - 1.0) / ax;
                 let y = (2.0 * ((mouse_y as f64) / w_h) - 1.0) / ay;
-                let z = 1.0/(fov.to_radians()/2.0).tan();
+
+                let t = -roll.to_radians();
+                let ct = t.cos();
+                let st = t.sin();
+
+                let bx = x * ct - y * st;
+                let by = y * ct + x * st;
+                let bz = 1.0/(fov.to_radians()/2.0).tan();
 
                 let viewer_pos = viewer.position();
 
-                let display = viewer.offset(z, heading, pitch);
+                let display = viewer.offset(bz, heading, pitch);
                 let display_pos = display.position();
 
                 let up = display.offset(1.0, heading, pitch + 90.0);
@@ -1043,7 +1050,7 @@ fn main() {
                 let right_vec = display_pos.vector(&right_pos);
                 let right_unit = right_vec.normalize();
 
-                let mouse_vec = right_unit.multiply(x).add(&up_unit.multiply(-y));
+                let mouse_vec = right_unit.multiply(bx).add(&up_unit.multiply(-by));
                 let mouse_pos = {
                     let v = display_pos.to_vector().add(&mouse_vec);
                     earth.position(v.x, v.y, v.z)
@@ -1293,12 +1300,12 @@ fn main() {
             let ground_perspective = viewer_pos.perspective(viewer_rot.0, viewer_rot.1, viewer_rot.2);
             let ground_pos = ground_perspective.position(0.0, 0.0, 0.0);
 
-            let perspective = ground_pos.perspective(pitch + 90.0, roll, heading - 90.0);
+            let perspective = ground_pos.perspective(pitch + 90.0, 0.0, heading - 90.0);
             let viewport = perspective.viewport(0.0, 0.0, 1.0/(fov.to_radians()/2.0).tan());
 
             let w_w = w.width() as i32;
             let w_h = w.height() as i32;
-            let screen = viewport.screen(w_w as f64, w_h as f64);
+            let screen = viewport.screen(w_w as f64, w_h as f64, roll);
 
             let triangle_map = |triangle: &(Position<Earth>, Position<Earth>, Position<Earth>, (f32, f32, f32), (u8, u8, u8))| -> Option<(Triangle, Color)> {
                 let a_earth = &triangle.0;
@@ -1374,6 +1381,7 @@ fn main() {
 
             w.set(sky_color);
 
+            /*
             {
                 let viewer_on_ground = earth.coordinate(viewer.latitude, viewer.longitude, 0.0);
 
@@ -1396,6 +1404,7 @@ fn main() {
                     }
                 }
             }
+            */
 
             for i in 0..z_buffer.len() {
                 z_buffer[i] = 0.0;
