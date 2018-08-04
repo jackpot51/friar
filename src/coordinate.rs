@@ -82,6 +82,13 @@ impl<'r, R: Spheroid> Coordinate<'r, R> {
         ).mod_euc(2.0 * f64::consts::PI).to_degrees()
     }
 
+    pub fn pitch(&self, to: &Self) -> f64 {
+        let d = self.distance(to);
+        let e = to.elevation - self.elevation;
+        let p = (e / (d.powi(2) + e.powi(2)).sqrt()).asin();
+        p.to_degrees()
+    }
+
     pub fn offset(&self, distance: f64, heading: f64, pitch: f64) -> Self {
         let f1 = self.latitude.to_radians();
         let l1 = self.longitude.to_radians();

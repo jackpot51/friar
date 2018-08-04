@@ -935,15 +935,36 @@ fn main() {
 
                             let x = (2.0 * ((mouse_x as f64) / w_w) - 1.0) / ax;
                             let y = (2.0 * ((mouse_y as f64) / w_h) - 1.0) / ay;
+                            let z = 1.0/(fov.to_radians()/2.0).tan();
 
-                            let xa = x * fov / 2.0;
-                            let ya = y * fov / 2.0;
+                            let viewer_pos = viewer.position();
 
-                            println!("{}, {} => {}, {}", x, y, xa, ya);
+                            let display = viewer.offset(z, heading, pitch);
+                            let display_pos = display.position();
 
-                            intersect_heading = xa + heading;
-                            intersect_pitch = pitch - ya;
+                            let up = display.offset(1.0, heading, pitch + 90.0);
+                            let up_pos = up.position();
+                            let up_vec = display_pos.vector(&up_pos);
+                            let up_unit = up_vec.normalize();
+
+                            let right = display.offset(1.0, heading + 90.0, 0.0);
+                            let right_pos = right.position();
+                            let right_vec = display_pos.vector(&right_pos);
+                            let right_unit = right_vec.normalize();
+
+                            let mouse_vec = right_unit.multiply(x).add(&up_unit.multiply(-y));
+                            let mouse_pos = {
+                                let v = display_pos.to_vector().add(&mouse_vec);
+                                earth.position(v.x, v.y, v.z)
+                            };
+
+                            let mouse_coord = mouse_pos.coordinate();
+
+                            intersect_heading = viewer.heading(&mouse_coord);
+                            intersect_pitch = viewer.pitch(&mouse_coord);
                             reintersect = true;
+
+                            println!("{}, {} => {}, {}", mouse_x, mouse_y, intersect_heading, intersect_pitch);
                         }
                     }
                     EventOption::Resize(resize_event) => {
@@ -1497,6 +1518,38 @@ fn main() {
                 let center = (w_w/2 as i32, w_h/2 as i32);
                 w.line(center.0 - 5, center.1, center.0 + 5, center.1, hud_color);
                 w.line(center.0, center.1 - 5, center.0, center.1 + 5, hud_color);
+
+                if let Some(ref intersect) = intersect_opt {
+                    let intersect_pos = intersect.position();
+                    let intersect_ground = ground_perspective.transform(&intersect_pos);
+                    let intersect_screen = screen.transform(&intersect_ground);
+
+                    if intersect_screen.0.is_sign_positive() && intersect_screen.0 < w_w as f64 &&
+                       intersect_screen.1.is_sign_positive() && intersect_screen.1 < w_h as f64 &&
+                       intersect_screen.2.is_sign_positive()
+                    {
+                        let x = intersect_screen.0.round() as i32;
+                        let y = intersect_screen.1.round() as i32;
+                        w.circle(x, y, 20, hud_color);
+
+                        let intersect_dist = viewer_pos.vector(&intersect_pos).norm();
+
+                        hud_string.clear();
+                        let _ = write!(
+                            hud_string,
+                            "{}m",
+                            intersect_dist.round() as u32
+                        );
+
+                        let text = hud_cache.render(&hud_string);
+                        text.draw(
+                            &mut w,
+                            x - (text.width() as i32)/2,
+                            y + 20,
+                            hud_color
+                        );
+                    }
+                }
             }
 
             if debug {
