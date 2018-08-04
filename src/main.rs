@@ -808,6 +808,7 @@ fn main() {
     let mut zoom_in = false;
     let mut zoom_out = false;
     let mut boresight_intersect = false;
+    let mut mouse_intersect = false;
 
     let mut shift = false;
 
@@ -925,47 +926,7 @@ fn main() {
                         mouse_y = mouse_event.y;
                     },
                     EventOption::Button(button_event) => {
-                        if button_event.left {
-                            let w_w = w.width() as f64;
-                            let w_h = w.height() as f64;
-
-                            let a = w_w.max(w_h);
-                            let ax = a / w_w;
-                            let ay = a / w_h;
-
-                            let x = (2.0 * ((mouse_x as f64) / w_w) - 1.0) / ax;
-                            let y = (2.0 * ((mouse_y as f64) / w_h) - 1.0) / ay;
-                            let z = 1.0/(fov.to_radians()/2.0).tan();
-
-                            let viewer_pos = viewer.position();
-
-                            let display = viewer.offset(z, heading, pitch);
-                            let display_pos = display.position();
-
-                            let up = display.offset(1.0, heading, pitch + 90.0);
-                            let up_pos = up.position();
-                            let up_vec = display_pos.vector(&up_pos);
-                            let up_unit = up_vec.normalize();
-
-                            let right = display.offset(1.0, heading + 90.0, 0.0);
-                            let right_pos = right.position();
-                            let right_vec = display_pos.vector(&right_pos);
-                            let right_unit = right_vec.normalize();
-
-                            let mouse_vec = right_unit.multiply(x).add(&up_unit.multiply(-y));
-                            let mouse_pos = {
-                                let v = display_pos.to_vector().add(&mouse_vec);
-                                earth.position(v.x, v.y, v.z)
-                            };
-
-                            let mouse_coord = mouse_pos.coordinate();
-
-                            intersect_heading = viewer.heading(&mouse_coord);
-                            intersect_pitch = viewer.pitch(&mouse_coord);
-                            reintersect = true;
-
-                            println!("{}, {} => {}, {}", mouse_x, mouse_y, intersect_heading, intersect_pitch);
-                        }
+                        mouse_intersect = button_event.left;
                     }
                     EventOption::Resize(resize_event) => {
                         w.sync_path();
@@ -1052,6 +1013,46 @@ fn main() {
             if boresight_intersect {
                 intersect_heading = heading;
                 intersect_pitch = pitch;
+                reintersect = true;
+            }
+
+            if mouse_intersect {
+                let w_w = w.width() as f64;
+                let w_h = w.height() as f64;
+
+                let a = w_w.max(w_h);
+                let ax = a / w_w;
+                let ay = a / w_h;
+
+                let x = (2.0 * ((mouse_x as f64) / w_w) - 1.0) / ax;
+                let y = (2.0 * ((mouse_y as f64) / w_h) - 1.0) / ay;
+                let z = 1.0/(fov.to_radians()/2.0).tan();
+
+                let viewer_pos = viewer.position();
+
+                let display = viewer.offset(z, heading, pitch);
+                let display_pos = display.position();
+
+                let up = display.offset(1.0, heading, pitch + 90.0);
+                let up_pos = up.position();
+                let up_vec = display_pos.vector(&up_pos);
+                let up_unit = up_vec.normalize();
+
+                let right = display.offset(1.0, heading + 90.0, 0.0);
+                let right_pos = right.position();
+                let right_vec = display_pos.vector(&right_pos);
+                let right_unit = right_vec.normalize();
+
+                let mouse_vec = right_unit.multiply(x).add(&up_unit.multiply(-y));
+                let mouse_pos = {
+                    let v = display_pos.to_vector().add(&mouse_vec);
+                    earth.position(v.x, v.y, v.z)
+                };
+
+                let mouse_coord = mouse_pos.coordinate();
+
+                intersect_heading = viewer.heading(&mouse_coord);
+                intersect_pitch = viewer.pitch(&mouse_coord);
                 reintersect = true;
             }
         }
@@ -1373,6 +1374,29 @@ fn main() {
 
             w.set(sky_color);
 
+            {
+                let viewer_on_ground = earth.coordinate(viewer.latitude, viewer.longitude, 0.0);
+
+                let radius = viewer_on_ground.radius();
+                let dist = (viewer.elevation * (2.0 * radius + viewer.elevation)).sqrt();
+
+                for &d in &[dist, -dist] {
+                    let horizon_coord = viewer_on_ground.offset(d, heading, 0.0);
+                    let horizon_earth = horizon_coord.position();
+                    let horizon_ground = ground_perspective.transform(&horizon_earth);
+                    let horizon_screen = screen.transform(&horizon_ground);
+
+                    let y = horizon_screen.1.round().max(0.0).min(screen.y) as i32;
+                    if horizon_screen.2.is_sign_positive() {
+                        if d.is_sign_positive() {
+                            w.rect(0, y, w_w as u32, (w_h - y as i32) as u32, ground_color);
+                        } else {
+                            w.rect(0, 0, w_w as u32, y as u32, ground_color);
+                        }
+                    }
+                }
+            }
+
             for i in 0..z_buffer.len() {
                 z_buffer[i] = 0.0;
             }
@@ -1524,9 +1548,10 @@ fn main() {
                     let intersect_ground = ground_perspective.transform(&intersect_pos);
                     let intersect_screen = screen.transform(&intersect_ground);
 
-                    if intersect_screen.0.is_sign_positive() && intersect_screen.0 < w_w as f64 &&
-                       intersect_screen.1.is_sign_positive() && intersect_screen.1 < w_h as f64 &&
-                       intersect_screen.2.is_sign_positive()
+
+                    if intersect_screen.0 > 0.0 && intersect_screen.0 < screen.x &&
+                        intersect_screen.1 > 0.0 && intersect_screen.1 < screen.y &&
+                        intersect_screen.2 > 0.01
                     {
                         let x = intersect_screen.0.round() as i32;
                         let y = intersect_screen.1.round() as i32;
