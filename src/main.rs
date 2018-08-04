@@ -863,7 +863,7 @@ fn main() {
                         },
                         orbclient::K_R if key_event.pressed => {
                             viewer = origin.duplicate();
-                            redraw = true;
+                            rehgt = true;
                         },
 
                         orbclient::K_J => {
@@ -962,41 +962,45 @@ fn main() {
 
             if move_up {
                 viewer = viewer.offset(speed, heading, pitch + 90.0);
-                redraw = true;
+                rehgt = true;
             }
 
             if move_down {
                 viewer = viewer.offset(-speed, heading, pitch + 90.0);
-                redraw = true;
+                rehgt = true;
             }
 
             if rotate_left {
-                heading = (heading - speed_rot).mod_euc(360.0);
+                heading = (heading - speed_rot * roll.to_radians().cos()).mod_euc(360.0);
+                pitch = (pitch - speed_rot * roll.to_radians().sin()).mod_euc(360.0);
                 redraw = true;
             }
 
             if rotate_right {
-                heading = (heading + speed_rot).mod_euc(360.0);
+                heading = (heading + speed_rot * roll.to_radians().cos()).mod_euc(360.0);
+                pitch = (pitch + speed_rot * roll.to_radians().sin()).mod_euc(360.0);
                 redraw = true;
             }
 
             if rotate_up {
-                pitch = (pitch + speed_rot).mod_euc(360.0);
+                heading = (heading - speed_rot * roll.to_radians().sin()).mod_euc(360.0);
+                pitch = (pitch + speed_rot * roll.to_radians().cos()).mod_euc(360.0);
                 redraw = true;
             }
 
             if rotate_down {
-                pitch = (pitch - speed_rot).mod_euc(360.0);
+                heading = (heading + speed_rot * roll.to_radians().sin()).mod_euc(360.0);
+                pitch = (pitch - speed_rot * roll.to_radians().cos()).mod_euc(360.0);
                 redraw = true;
             }
 
             if roll_left {
-                roll = (roll - speed_rot).mod_euc(360.0);
+                roll = (roll + speed_rot).mod_euc(360.0);
                 redraw = true;
             }
 
             if roll_right {
-                roll = (roll + speed_rot).mod_euc(360.0);
+                roll = (roll - speed_rot).mod_euc(360.0);
                 redraw = true;
             }
 
@@ -1286,6 +1290,7 @@ fn main() {
             drop(timer);
         }
 
+        redraw = true; // Force redraw
         if redraw {
             let timer = Timer::new("draw", debug);
 
@@ -1381,7 +1386,6 @@ fn main() {
 
             w.set(sky_color);
 
-            /*
             {
                 let viewer_on_ground = earth.coordinate(viewer.latitude, viewer.longitude, 0.0);
 
@@ -1394,17 +1398,21 @@ fn main() {
                     let horizon_ground = ground_perspective.transform(&horizon_earth);
                     let horizon_screen = screen.transform(&horizon_ground);
 
-                    let y = horizon_screen.1.round().max(0.0).min(screen.y) as i32;
+                    let dy = (w_w as f64) / 2.0 * roll.to_radians().tan();
+                    let yl = horizon_screen.1 - dy;
+                    let yr = horizon_screen.1 + dy;
+
+                    let y = yl.max(yr).round().max(0.0).min(screen.y) as i32;
                     if horizon_screen.2.is_sign_positive() {
-                        if d.is_sign_positive() {
-                            w.rect(0, y, w_w as u32, (w_h - y as i32) as u32, ground_color);
-                        } else {
-                            w.rect(0, 0, w_w as u32, y as u32, ground_color);
-                        }
+                        w.line(0, yl as i32, w_w - 1, yr as i32, ground_color);
+                        // if d.is_sign_positive() {
+                        //     w.rect(0, y, w_w as u32, (w_h - y as i32) as u32, ground_color);
+                        // } else {
+                        //     w.rect(0, 0, w_w as u32, y as u32, ground_color);
+                        // }
                     }
                 }
             }
-            */
 
             for i in 0..z_buffer.len() {
                 z_buffer[i] = 0.0;
