@@ -27,10 +27,6 @@ impl<'r, R: Reference> Perspective<'r, R> {
     ///
     /// Adapted from https://en.wikipedia.org/wiki/3D_projection#Perspective_projection
     pub fn transform(&self, from: &Position<'r, R>) -> Position<Self> {
-        let x = from.x - self.position.x;
-        let y = from.y - self.position.y;
-        let z = from.z - self.position.z;
-
         let rx = self.rx.to_radians();
         let ry = self.ry.to_radians();
         let rz = self.rz.to_radians();
@@ -43,11 +39,15 @@ impl<'r, R: Reference> Perspective<'r, R> {
         let sy = ry.sin();
         let sz = rz.sin();
 
+        let x = from.x - self.position.x;
+        let y = from.y - self.position.y;
+        let z = from.z - self.position.z;
+
         let dx = cy * (sz * y + cz * x) - sy * z;
         let dy = sx * (cy * z + sy * (sz * y + cz * x)) + cx * (cz * y - sz * x);
         let dz = cx * (cy * z + sy * (sz * y + cz * x)) - sx * (cz * y - sz * x);
 
-        Position::new(self, dx, dy, dz)
+        self.position(dx, dy, dz)
     }
 
     /// Create a viewport with this perspective
