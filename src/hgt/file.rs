@@ -121,4 +121,63 @@ impl HgtFile {
             None
         }
     }
+
+    pub fn interpolate(&self, latitude: f64, longitude: f64) -> Option<f64> {
+        let res = self.resolution.degrees();
+        let x = (longitude - self.longitude) / res;
+        let y = (latitude - self.latitude) / res;
+
+        let (x1i, y1i) = {
+            let samples = self.resolution.samples() as i64;
+            let xi = x.floor() as i64;
+            let yi = y.floor() as i64;
+            if xi > 0 && xi + 1 < samples && yi > 0 && yi + 1 < samples {
+                (xi as u16, yi as u16)
+            } else {
+                return None;
+            }
+        };
+
+        let (x2i, y2i) = (x1i + 1, y1i + 1);
+
+        let mut h_total = 0.0;
+        let mut h_count = 0;
+        let (h11_opt, h12_opt, h21_opt, h22_opt) = {
+            let mut h_fn = |col: u16, row: u16| -> Option<f64> {
+                let h = self.get(row, col)? as f64;
+                h_total += h;
+                h_count += 1;
+                Some(h)
+            };
+
+            (
+                h_fn(x1i, y1i),
+                h_fn(x1i, y2i),
+                h_fn(x2i, y1i),
+                h_fn(x2i, y2i),
+            )
+        };
+
+        if h_count == 0 {
+            return None;
+        }
+
+        let h_avg = h_total / (h_count as f64);
+        let (h11, h12, h21, h22) = (
+            h11_opt.unwrap_or(h_avg),
+            h12_opt.unwrap_or(h_avg),
+            h21_opt.unwrap_or(h_avg),
+            h22_opt.unwrap_or(h_avg),
+        );
+
+        let (x1, y1) = (x1i as f64, y1i as f64);
+        let (x2, y2) = (x2i as f64, y2i as f64);
+
+        Some((1.0 / ((x2 - x1) * (y2 - y1))) * (
+            h11 * (x2 - x) * (y2 - y) +
+            h21 * (x - x1) * (y2 - y) +
+            h12 * (x2 - x) * (y - y1) +
+            h22 * (x - x1) * (y - y1)
+        ))
+    }
 }

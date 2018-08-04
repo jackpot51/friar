@@ -584,6 +584,43 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
     triangles
 }
 
+
+fn hgt_intersect<'r, R: Spheroid>(file: &HgtFile, reference: &'r R, origin: &Coordinate<'r, R>, heading: f64, pitch: f64) -> Option<Coordinate<'r, R>> {
+    let mut a = origin.duplicate();
+    let mut a_h = file.interpolate(a.latitude, a.longitude)?;
+    let mut a_dh = a.elevation - a_h;
+    //TODO: Consider parallelizing
+    loop {
+        let b = a.offset(1.0, heading, pitch);
+        let b_h = file.interpolate(b.latitude, b.longitude)?;
+        let b_dh = b.elevation - b_h;
+
+        // Upon transition, return b
+        // TODO: Find correct intersect point
+        if (a_dh.is_sign_negative() && b_dh.is_sign_positive()) ||
+           (a_dh.is_sign_positive() && b_dh.is_sign_negative())
+        {
+            // println!("origin: {}, heading: {}, pitch: {}", origin, heading, pitch);
+            // println!(
+            //     "a: {}, a_h: {}, a_dh: {}, b: {}, b_h: {}, b_dh: {}",
+            //     a, a_h, a_dh,
+            //     b, b_h, b_dh
+            // );
+            return Some(reference.coordinate(
+                (a.latitude + b.latitude)/2.0,
+                (a.longitude + b.longitude)/2.0,
+                (a_h + b_h)/2.0
+            ));
+        }
+
+        //TODO: Find easy ways to exit loop early
+
+        a = b;
+        a_h = b_h;
+        a_dh = b_dh;
+    }
+}
+
 fn hgt<'r, R: Spheroid + Sync>(file: &HgtFile, reference: &'r R, bounds: (f64, f64, f64, f64), tiles: &mut Vec<(Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>)>) {
     let samples = file.resolution.samples();
 
@@ -671,8 +708,7 @@ fn main() {
 
     let earth = Earth;
 
-    let mut xplane_opt: Option<XPlane> = None;
-    // Some(XPlane::new("127.0.0.1", 30).unwrap());
+    let mut xplane_opt: Option<XPlane> = None; //Some(XPlane::new("127.0.0.1", 30).unwrap());
 
     let (center_lat, center_lon, center_res): (f64, f64, bool) = if let Some(ref mut xplane) = xplane_opt {
         loop {
@@ -698,7 +734,7 @@ fn main() {
     let (hgt_res, hgt_horizon) = if center_res {
         (HgtResolution::One, 4000.0)
     } else {
-        (HgtResolution::Three, 32000.0)
+        (HgtResolution::Three, 8000.0)
     };
 
     let hgt_cache = HgtCache::new("cache");
@@ -732,7 +768,7 @@ fn main() {
 
     let mut hgt_tiles = Vec::new();
     let mut hgt_triangles = Vec::new();
-    let osm_triangles = Vec::new();
+    let mut osm_triangles = Vec::new();
     /*osm(
         //"cache/OSM/Denver.osm.pbf",
         "res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf",
@@ -743,6 +779,11 @@ fn main() {
         ),
         ground
     );*/
+
+    let mut intersect_heading = 0.0;
+    let mut intersect_pitch = 0.0;
+    let mut intersect_opt = None;
+    let mut intersect_triangles = Vec::new();
 
     let mut viewer = origin.duplicate();
     let mut heading = orientation.0;
@@ -766,16 +807,21 @@ fn main() {
 
     let mut zoom_in = false;
     let mut zoom_out = false;
+    let mut boresight_intersect = false;
 
     let mut shift = false;
 
+    let mut mouse_x = 0;
+    let mut mouse_y = 0;
+
     let mut debug = false;
+    let mut reintersect = false;
     let mut rehgt = true;
     let mut redraw = true;
     let mut redraw_times = 2;
     let mut fill = true;
     let mut z_buffer = vec![0.0; (w.width() * w.height()) as usize];
-    let mut triangles = Vec::with_capacity(hgt_triangles.len() + osm_triangles.len());
+    let mut triangles = Vec::with_capacity(hgt_triangles.len() + osm_triangles.len() + intersect_triangles.len());
 
     let mut last_instant = Instant::now();
     loop {
@@ -831,12 +877,12 @@ fn main() {
                         orbclient::K_K => {
                             rotate_up = key_event.pressed;
                         },
-                        orbclient::K_U => {
-                            roll_left = key_event.pressed;
-                        },
-                        orbclient::K_O => {
-                            roll_right = key_event.pressed;
-                        },
+                        // orbclient::K_U => {
+                        //     roll_left = key_event.pressed;
+                        // },
+                        // orbclient::K_O => {
+                        //     roll_right = key_event.pressed;
+                        // },
                         orbclient::K_P if key_event.pressed => {
                             heading = orientation.0;
                             pitch = orientation.1;
@@ -854,6 +900,9 @@ fn main() {
                             fov = original_fov;
                             redraw = true;
                         },
+                        orbclient::K_SPACE => {
+                            boresight_intersect = key_event.pressed;
+                        }
 
                         orbclient::K_LEFT_SHIFT => {
                             shift = key_event.pressed;
@@ -871,6 +920,32 @@ fn main() {
 
                         _ => (),
                     },
+                    EventOption::Mouse(mouse_event) => {
+                        mouse_x = mouse_event.x;
+                        mouse_y = mouse_event.y;
+                    },
+                    EventOption::Button(button_event) => {
+                        if button_event.left {
+                            let w_w = w.width() as f64;
+                            let w_h = w.height() as f64;
+
+                            let a = w_w.max(w_h);
+                            let ax = a / w_w;
+                            let ay = a / w_h;
+
+                            let x = (2.0 * ((mouse_x as f64) / w_w) - 1.0) / ax;
+                            let y = (2.0 * ((mouse_y as f64) / w_h) - 1.0) / ay;
+
+                            let xa = x * fov / 2.0;
+                            let ya = y * fov / 2.0;
+
+                            println!("{}, {} => {}, {}", x, y, xa, ya);
+
+                            intersect_heading = xa + heading;
+                            intersect_pitch = pitch - ya;
+                            reintersect = true;
+                        }
+                    }
                     EventOption::Resize(resize_event) => {
                         w.sync_path();
                         z_buffer = vec![0.0; (resize_event.width * resize_event.height) as usize];
@@ -952,6 +1027,12 @@ fn main() {
                 fov = (fov + speed_zoom).min(180.0);
                 redraw = true;
             }
+
+            if boresight_intersect {
+                intersect_heading = heading;
+                intersect_pitch = pitch;
+                reintersect = true;
+            }
         }
 
         if let Some(ref mut xplane) = xplane_opt {
@@ -971,6 +1052,97 @@ fn main() {
 
                 rehgt = true;
             }
+        }
+
+        if reintersect {
+            let timer = Timer::new("intersect", debug);
+
+            reintersect = false;
+
+            intersect_opt = if let Some(hgt_file) = hgt_files.get(0) {
+                hgt_intersect(hgt_file, &earth, &viewer, intersect_heading, intersect_pitch)
+            } else {
+                None
+            };
+
+            intersect_triangles.clear();
+            if let Some(ref intersect) = intersect_opt {
+                let size = 10.0;
+                // NW
+                let a = intersect.offset(size, 315.0, 45.0);
+                // NE
+                let b = intersect.offset(size, 45.0, 45.0);
+                // SW
+                let c = intersect.offset(size, 225.0, 45.0);
+                // SW
+                let d = intersect.offset(size, 135.0, 45.0);
+
+                let intersect_pos = intersect.position();
+                let a_pos = a.position();
+                let b_pos = b.position();
+                let c_pos = c.position();
+                let d_pos = d.position();
+
+                let rgb = (hud_color.r(), hud_color.g(), hud_color.b());
+
+                // Draw top
+                {
+                    intersect_triangles.push((
+                        a_pos.duplicate(),
+                        b_pos.duplicate(),
+                        c_pos.duplicate(),
+                        (1.0, 1.0, 1.0),
+                        rgb,
+                    ));
+
+                    intersect_triangles.push((
+                        b_pos.duplicate(),
+                        c_pos.duplicate(),
+                        d_pos.duplicate(),
+                        (1.0, 1.0, 1.0),
+                        rgb,
+                    ));
+                }
+
+                // Draw sides
+                {
+                    intersect_triangles.push((
+                        intersect_pos.duplicate(),
+                        a_pos.duplicate(),
+                        b_pos.duplicate(),
+                        (0.5, 0.5, 0.5),
+                        rgb,
+                    ));
+
+                    intersect_triangles.push((
+                        intersect_pos.duplicate(),
+                        b_pos.duplicate(),
+                        c_pos.duplicate(),
+                        (0.5, 0.5, 0.5),
+                        rgb,
+                    ));
+
+                    intersect_triangles.push((
+                        intersect_pos.duplicate(),
+                        c_pos.duplicate(),
+                        d_pos.duplicate(),
+                        (0.5, 0.5, 0.5),
+                        rgb,
+                    ));
+
+                    intersect_triangles.push((
+                        intersect_pos.duplicate(),
+                        d_pos.duplicate(),
+                        a_pos.duplicate(),
+                        (0.5, 0.5, 0.5),
+                        rgb,
+                    ));
+                }
+            }
+
+            redraw = true;
+
+            drop(timer);
         }
 
         let viewer_pos = viewer.position();
@@ -1174,6 +1346,7 @@ fn main() {
             triangles.par_extend(
                 hgt_triangles.par_iter()
                     .chain(osm_triangles.par_iter())
+                    .chain(intersect_triangles.par_iter())
                     .filter_map(triangle_map)
             );
 
@@ -1383,6 +1556,15 @@ fn main() {
                     "FPS: {}",
                     1.0/time
                 );
+                y += 16;
+
+                if let Some(ref intersect) = intersect_opt {
+                    let _ = write!(
+                        WindowWriter::new(&mut w, 0, y, hud_color),
+                        "Looking at: {}",
+                        intersect
+                    );
+                }
             }
 
             w.sync();
