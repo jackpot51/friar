@@ -9,6 +9,7 @@ extern crate rayon;
 
 use friar::coordinate::Coordinate;
 use friar::earth::Earth;
+use friar::gdl90::{Gdl90, Gdl90Kind};
 use friar::hgt::{HgtCache, HgtFile, HgtResolution};
 use friar::position::Position;
 use friar::reference::Reference;
@@ -708,6 +709,8 @@ fn main() {
 
     let earth = Earth;
 
+    let mut gdl90 = Gdl90::new().unwrap();
+
     let mut xplane_opt: Option<XPlane> = None; //Some(XPlane::new("127.0.0.1", 30).unwrap());
 
     let (center_lat, center_lon, center_res): (f64, f64, bool) = if let Some(ref mut xplane) = xplane_opt {
@@ -720,10 +723,11 @@ fn main() {
         }
     } else {
         (
+            //39.856096, -104.673727, true // Denver International Airport
             //37.619268, -112.166357, true // Bryce Canyon
-            //39.639720, -104.854705, true // Cherry Creek Reservoir
+            39.639720, -104.854705, true // Cherry Creek Reservoir
             //39.588303, -105.643829, true // Mount Evans
-            39.610061, -106.056893, true // Dillon Reservoir
+            //39.610061, -106.056893, true // Dillon Reservoir
             //39.739230, -104.987403, true // Downtown Denver
             //40.573420, 14.297834, false // Capri
             //40.633537, 14.602547, false // Amalfi
@@ -780,6 +784,9 @@ fn main() {
         ground
     );*/
 
+    let mut traffics = HashMap::new();
+    let mut traffic_triangles = Vec::new();
+
     let mut intersect_heading = 0.0;
     let mut intersect_pitch = 0.0;
     let mut intersect_opt = None;
@@ -816,6 +823,7 @@ fn main() {
     let mut mouse_y = 0;
 
     let mut debug = false;
+    let mut retraffic = false;
     let mut reintersect = false;
     let mut rehgt = true;
     let mut redraw = true;
@@ -1066,6 +1074,30 @@ fn main() {
             }
         }
 
+        while let Some(msg) = gdl90.message().unwrap() {
+            if let Some(kind) = msg.kind() {
+                match kind {
+                    Gdl90Kind::Heartbeat(heartbeat) => {
+                        //println!("{:?}", heartbeat);
+                    },
+                    Gdl90Kind::Traffic(traffic) => {
+                        println!("{:?}: {} callsign {} lat, {} lon, {} alt, {} hdg",
+                            traffic.address(),
+                            traffic.callsign(),
+                            traffic.latitude(),
+                            traffic.longitude(),
+                            traffic.altitude(),
+                            traffic.heading()
+                        );
+
+                        traffics.insert(traffic.id(), traffic);
+
+                        retraffic = true;
+                    }
+                }
+            }
+        }
+
         if let Some(ref mut xplane) = xplane_opt {
             Timer::new("xplane", debug);
             while let Some(position) = xplane.position().unwrap() {
@@ -1083,6 +1115,99 @@ fn main() {
 
                 rehgt = true;
             }
+        }
+
+        if retraffic {
+            let timer = Timer::new("traffic", debug);
+
+            retraffic = false;
+
+            traffic_triangles.clear();
+            for (id, traffic) in &traffics {
+                let traffic_coord = earth.coordinate(
+                    traffic.latitude(),
+                    traffic.longitude(),
+                    traffic.altitude() * 0.3048
+                );
+
+                let traffic_heading = traffic.heading();
+
+                let size = 10.0;
+                // Top Left
+                let a = traffic_coord.offset(size, traffic_heading + 225.0, 45.0);
+                // Top Right
+                let b = traffic_coord.offset(size, traffic_heading + 135.0, 45.0);
+                // Bottom Right
+                let c = traffic_coord.offset(size, traffic_heading + 135.0, -45.0);
+                // Bottom Left
+                let d = traffic_coord.offset(size, traffic_heading + 225.0, -45.0);
+
+                let traffic_pos = traffic_coord.position();
+                let a_pos = a.position();
+                let b_pos = b.position();
+                let c_pos = c.position();
+                let d_pos = d.position();
+
+                let rgb = (hud_color.r(), hud_color.g(), hud_color.b());
+
+                // Draw rear
+                {
+                    traffic_triangles.push((
+                        a_pos.duplicate(),
+                        b_pos.duplicate(),
+                        d_pos.duplicate(),
+                        (1.0, 1.0, 1.0),
+                        rgb,
+                    ));
+
+                    traffic_triangles.push((
+                        b_pos.duplicate(),
+                        d_pos.duplicate(),
+                        c_pos.duplicate(),
+                        (1.0, 1.0, 1.0),
+                        rgb,
+                    ));
+                }
+
+                // Draw sides
+                {
+                    traffic_triangles.push((
+                        traffic_pos.duplicate(),
+                        a_pos.duplicate(),
+                        b_pos.duplicate(),
+                        (0.5, 0.5, 0.5),
+                        rgb,
+                    ));
+
+                    traffic_triangles.push((
+                        traffic_pos.duplicate(),
+                        b_pos.duplicate(),
+                        c_pos.duplicate(),
+                        (0.5, 0.5, 0.5),
+                        rgb,
+                    ));
+
+                    traffic_triangles.push((
+                        traffic_pos.duplicate(),
+                        c_pos.duplicate(),
+                        d_pos.duplicate(),
+                        (0.5, 0.5, 0.5),
+                        rgb,
+                    ));
+
+                    traffic_triangles.push((
+                        traffic_pos.duplicate(),
+                        d_pos.duplicate(),
+                        a_pos.duplicate(),
+                        (0.5, 0.5, 0.5),
+                        rgb,
+                    ));
+                }
+            }
+
+            redraw = true;
+
+            drop(timer);
         }
 
         if reintersect {
@@ -1103,10 +1228,10 @@ fn main() {
                 let a = intersect.offset(size, 315.0, 45.0);
                 // NE
                 let b = intersect.offset(size, 45.0, 45.0);
+                // SE
+                let c = intersect.offset(size, 135.0, 45.0);
                 // SW
-                let c = intersect.offset(size, 225.0, 45.0);
-                // SW
-                let d = intersect.offset(size, 135.0, 45.0);
+                let d = intersect.offset(size, 225.0, 45.0);
 
                 let intersect_pos = intersect.position();
                 let a_pos = a.position();
@@ -1121,15 +1246,15 @@ fn main() {
                     intersect_triangles.push((
                         a_pos.duplicate(),
                         b_pos.duplicate(),
-                        c_pos.duplicate(),
+                        d_pos.duplicate(),
                         (1.0, 1.0, 1.0),
                         rgb,
                     ));
 
                     intersect_triangles.push((
                         b_pos.duplicate(),
-                        c_pos.duplicate(),
                         d_pos.duplicate(),
+                        c_pos.duplicate(),
                         (1.0, 1.0, 1.0),
                         rgb,
                     ));
@@ -1378,6 +1503,7 @@ fn main() {
             triangles.par_extend(
                 hgt_triangles.par_iter()
                     .chain(osm_triangles.par_iter())
+                    .chain(traffic_triangles.par_iter())
                     .chain(intersect_triangles.par_iter())
                     .filter_map(triangle_map)
             );
@@ -1404,15 +1530,15 @@ fn main() {
                     let yr = horizon_screen.1 + ((w_w as f64) - horizon_screen.0) * roll.to_radians().tan();
 
                     if horizon_screen.2.is_sign_positive() {
-                        // if d.is_sign_positive() {
-                        //     let y = yl.max(yr).round().max(0.0).min(screen.y) as i32;
-                        //     w.rect(0, y, w_w as u32, (w_h - y as i32) as u32, ground_color);
-                        // } else {
-                        //     let y = yl.min(yr).round().max(0.0).min(screen.y) as i32;
-                        //     w.rect(0, 0, w_w as u32, y as u32, ground_color);
-                        // }
+                        if d.is_sign_positive() {
+                            let y = yl.max(yr).round().max(0.0).min(screen.y) as i32;
+                            w.rect(0, y, w_w as u32, (w_h - y as i32) as u32, ground_color);
+                        } else {
+                            let y = yl.min(yr).round().max(0.0).min(screen.y) as i32;
+                            w.rect(0, 0, w_w as u32, y as u32, ground_color);
+                        }
 
-                        println!("{}: {}, {}", roll, yl, yr);
+                        // println!("{}: {}, {}", roll, yl, yr);
 
                         let flip = if d.is_sign_positive() {
                             roll > 90.0 && roll < 270.0
@@ -1600,11 +1726,59 @@ fn main() {
                 w.line(center.0 - 5, center.1, center.0 + 5, center.1, hud_color);
                 w.line(center.0, center.1 - 5, center.0, center.1 + 5, hud_color);
 
+                for (id, traffic) in &traffics {
+                    let traffic_coord = earth.coordinate(
+                        traffic.latitude(),
+                        traffic.longitude(),
+                        traffic.altitude() * 0.3048
+                    );
+                    let traffic_pos = traffic_coord.position();
+                    let traffic_ground = ground_perspective.transform(&traffic_pos);
+                    let traffic_screen = screen.transform(&traffic_ground);
+
+                    if traffic_screen.0 > 0.0 && traffic_screen.0 < screen.x &&
+                        traffic_screen.1 > 0.0 && traffic_screen.1 < screen.y &&
+                        traffic_screen.2 > 0.01
+                    {
+                        let x = traffic_screen.0.round() as i32;
+                        let y = traffic_screen.1.round() as i32;
+                        w.circle(x, y, 20, hud_color);
+
+                        {
+                            let text = hud_cache.render(&traffic.callsign());
+                            text.draw(
+                                &mut w,
+                                x - (text.width() as i32)/2,
+                                y - (text.height() as i32) - 20,
+                                hud_color
+                            );
+                        }
+
+                        let traffic_dist = viewer_pos.vector(&traffic_pos).norm();
+
+                        hud_string.clear();
+                        let _ = write!(
+                            hud_string,
+                            "{}m",
+                            traffic_dist.round() as u32
+                        );
+
+                        {
+                            let text = hud_cache.render(&hud_string);
+                            text.draw(
+                                &mut w,
+                                x - (text.width() as i32)/2,
+                                y + 20,
+                                hud_color
+                            );
+                        }
+                    }
+                }
+
                 if let Some(ref intersect) = intersect_opt {
                     let intersect_pos = intersect.position();
                     let intersect_ground = ground_perspective.transform(&intersect_pos);
                     let intersect_screen = screen.transform(&intersect_ground);
-
 
                     if intersect_screen.0 > 0.0 && intersect_screen.0 < screen.x &&
                         intersect_screen.1 > 0.0 && intersect_screen.1 < screen.y &&
