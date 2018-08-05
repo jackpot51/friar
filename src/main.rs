@@ -1039,8 +1039,6 @@ fn main() {
                 let by = y * ct + x * st;
                 let bz = 1.0/(fov.to_radians()/2.0).tan();
 
-                let viewer_pos = viewer.position();
-
                 let display = viewer.offset(bz, heading, pitch);
                 let display_pos = display.position();
 
@@ -1386,6 +1384,10 @@ fn main() {
 
             w.set(sky_color);
 
+            for i in 0..z_buffer.len() {
+                z_buffer[i] = 0.0;
+            }
+
             {
                 let viewer_on_ground = earth.coordinate(viewer.latitude, viewer.longitude, 0.0);
 
@@ -1398,24 +1400,62 @@ fn main() {
                     let horizon_ground = ground_perspective.transform(&horizon_earth);
                     let horizon_screen = screen.transform(&horizon_ground);
 
-                    let dy = (w_w as f64) / 2.0 * roll.to_radians().tan();
-                    let yl = horizon_screen.1 - dy;
-                    let yr = horizon_screen.1 + dy;
+                    let yl = horizon_screen.1 - horizon_screen.0 * roll.to_radians().tan();
+                    let yr = horizon_screen.1 + ((w_w as f64) - horizon_screen.0) * roll.to_radians().tan();
 
-                    let y = yl.max(yr).round().max(0.0).min(screen.y) as i32;
                     if horizon_screen.2.is_sign_positive() {
-                        w.line(0, yl as i32, w_w - 1, yr as i32, ground_color);
                         // if d.is_sign_positive() {
+                        //     let y = yl.max(yr).round().max(0.0).min(screen.y) as i32;
                         //     w.rect(0, y, w_w as u32, (w_h - y as i32) as u32, ground_color);
                         // } else {
+                        //     let y = yl.min(yr).round().max(0.0).min(screen.y) as i32;
                         //     w.rect(0, 0, w_w as u32, y as u32, ground_color);
                         // }
+
+                        println!("{}: {}, {}", roll, yl, yr);
+
+                        let flip = if d.is_sign_positive() {
+                            roll > 90.0 && roll < 270.0
+                        } else {
+                            !(roll > 90.0 && roll < 270.0)
+                        };
+
+                        let (xl, xr) = (0, w_w - 1);
+
+                        let a = Point {
+                            x: xl,
+                            y: yl.round() as i32,
+                            z: 1.0 / (dist as f32),
+                            intensity: 1.0
+                        };
+
+                        let b = Point {
+                            x: xr,
+                            y: yr.round() as i32,
+                            z: 1.0 / (dist as f32),
+                            intensity: 1.0
+                        };
+
+                        let c = if yl > yr {
+                            Point {
+                                x: xr,
+                                y: yl.round() as i32,
+                                z: 1.0 / (dist as f32),
+                                intensity: 1.0
+                            }
+                        } else {
+                            Point {
+                                x: xl,
+                                y: yr.round() as i32,
+                                z: 1.0 / (dist as f32),
+                                intensity: 1.0
+                            }
+                        };
+
+                        let triangle = Triangle::new(a, b, c);
+                        triangle.fill(&mut w, &mut z_buffer, ground_color);
                     }
                 }
-            }
-
-            for i in 0..z_buffer.len() {
-                z_buffer[i] = 0.0;
             }
 
             for (triangle, color) in triangles.iter() {
