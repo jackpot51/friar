@@ -9,14 +9,14 @@ fn main() {
 
     loop {
         if let Some(msg) = gdl90.message().unwrap() {
-            //println!("{:>02X}", msg.id());
+            println!("{:>02X}", msg.id());
             if let Some(kind) = msg.kind() {
                 match kind {
                     Gdl90Kind::Heartbeat(heartbeat) => {
-                        //println!("{:?}", heartbeat);
+                        println!("{:?}", heartbeat);
                     },
-                    Gdl90Kind::Traffic(traffic) => {
-                        println!("{:?}: {} callsign {} lat, {} lon, {} alt, {} hdg",
+                    Gdl90Kind::Ownship(traffic) | Gdl90Kind::Traffic(traffic) => {
+                        println!("{:?} ({}): {}, {}, {}, {}",
                             traffic.address(),
                             traffic.callsign(),
                             traffic.latitude(),
@@ -24,6 +24,12 @@ fn main() {
                             traffic.altitude(),
                             traffic.heading()
                         );
+                    },
+                    Gdl90Kind::GeoAltitude(altitude) => {
+                        println!("{:?}", altitude);
+                    },
+                    Gdl90Kind::ForeFlightAhrs(ahrs) => {
+                        println!("{:?}", ahrs);
                     }
                 }
             }

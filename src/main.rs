@@ -1133,14 +1133,15 @@ fn main() {
                 let traffic_heading = traffic.heading();
 
                 let size = 10.0;
+                let angle = 30.0;
                 // Top Left
-                let a = traffic_coord.offset(size, traffic_heading + 225.0, 45.0);
+                let a = traffic_coord.offset(size, traffic_heading + 180.0 + angle, angle);
                 // Top Right
-                let b = traffic_coord.offset(size, traffic_heading + 135.0, 45.0);
+                let b = traffic_coord.offset(size, traffic_heading + 180.0 - angle, angle);
                 // Bottom Right
-                let c = traffic_coord.offset(size, traffic_heading + 135.0, -45.0);
+                let c = traffic_coord.offset(size, traffic_heading + 180.0 - angle, -angle);
                 // Bottom Left
-                let d = traffic_coord.offset(size, traffic_heading + 225.0, -45.0);
+                let d = traffic_coord.offset(size, traffic_heading + 180.0 + angle, -angle);
 
                 let traffic_pos = traffic_coord.position();
                 let a_pos = a.position();
@@ -1156,7 +1157,7 @@ fn main() {
                         a_pos.duplicate(),
                         b_pos.duplicate(),
                         d_pos.duplicate(),
-                        (1.0, 1.0, 1.0),
+                        (0.5, 0.5, 0.5),
                         rgb,
                     ));
 
@@ -1164,7 +1165,7 @@ fn main() {
                         b_pos.duplicate(),
                         d_pos.duplicate(),
                         c_pos.duplicate(),
-                        (1.0, 1.0, 1.0),
+                        (0.5, 0.5, 0.5),
                         rgb,
                     ));
                 }
@@ -1175,7 +1176,7 @@ fn main() {
                         traffic_pos.duplicate(),
                         a_pos.duplicate(),
                         b_pos.duplicate(),
-                        (0.5, 0.5, 0.5),
+                        (1.0, 1.0, 1.0),
                         rgb,
                     ));
 
@@ -1183,7 +1184,7 @@ fn main() {
                         traffic_pos.duplicate(),
                         b_pos.duplicate(),
                         c_pos.duplicate(),
-                        (0.5, 0.5, 0.5),
+                        (1.0, 1.0, 1.0),
                         rgb,
                     ));
 
@@ -1191,7 +1192,7 @@ fn main() {
                         traffic_pos.duplicate(),
                         c_pos.duplicate(),
                         d_pos.duplicate(),
-                        (0.5, 0.5, 0.5),
+                        (1.0, 1.0, 1.0),
                         rgb,
                     ));
 
@@ -1199,7 +1200,7 @@ fn main() {
                         traffic_pos.duplicate(),
                         d_pos.duplicate(),
                         a_pos.duplicate(),
-                        (0.5, 0.5, 0.5),
+                        (1.0, 1.0, 1.0),
                         rgb,
                     ));
                 }
@@ -1224,14 +1225,15 @@ fn main() {
             intersect_triangles.clear();
             if let Some(ref intersect) = intersect_opt {
                 let size = 10.0;
+                let angle = 60.0;
                 // NW
-                let a = intersect.offset(size, 315.0, 45.0);
+                let a = intersect.offset(size, 315.0, angle);
                 // NE
-                let b = intersect.offset(size, 45.0, 45.0);
+                let b = intersect.offset(size, 45.0, angle);
                 // SE
-                let c = intersect.offset(size, 135.0, 45.0);
+                let c = intersect.offset(size, 135.0, angle);
                 // SW
-                let d = intersect.offset(size, 225.0, 45.0);
+                let d = intersect.offset(size, 225.0, angle);
 
                 let intersect_pos = intersect.position();
                 let a_pos = a.position();
