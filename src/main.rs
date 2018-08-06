@@ -784,6 +784,7 @@ fn main() {
         ground
     );*/
 
+    let mut traffic_ownship_alt = None;
     let mut traffics = HashMap::new();
     let mut traffic_triangles = Vec::new();
 
@@ -1077,11 +1078,8 @@ fn main() {
         while let Some(msg) = gdl90.message().unwrap() {
             if let Some(kind) = msg.kind() {
                 match kind {
-                    Gdl90Kind::Heartbeat(heartbeat) => {
-                        //println!("{:?}", heartbeat);
-                    },
-                    Gdl90Kind::Traffic(traffic) => {
-                        println!("{:?}: {} callsign {} lat, {} lon, {} alt, {} hdg",
+                    Gdl90Kind::Ownship(traffic) => {
+                        println!("{:?} ({}): {}, {}, {}, {}",
                             traffic.address(),
                             traffic.callsign(),
                             traffic.latitude(),
@@ -1090,10 +1088,28 @@ fn main() {
                             traffic.heading()
                         );
 
-                        traffics.insert(traffic.id(), traffic);
+                        traffics.insert(traffic.id(), (traffic, traffic_ownship_alt));
 
                         retraffic = true;
-                    }
+                    },
+                    Gdl90Kind::GeoAltitude(altitude) => {
+                        traffic_ownship_alt = Some(altitude.altitude());
+                    },
+                    Gdl90Kind::Traffic(traffic) => {
+                        println!("{:?} ({}): {}, {}, {}, {}",
+                            traffic.address(),
+                            traffic.callsign(),
+                            traffic.latitude(),
+                            traffic.longitude(),
+                            traffic.altitude(),
+                            traffic.heading()
+                        );
+
+                        traffics.insert(traffic.id(), (traffic, None));
+
+                        retraffic = true;
+                    },
+                    _ => ()
                 }
             }
         }
@@ -1123,11 +1139,17 @@ fn main() {
             retraffic = false;
 
             traffic_triangles.clear();
-            for (id, traffic) in &traffics {
+            for (id, (traffic, alt_override)) in &traffics {
+                let alt = if let Some(some) = alt_override {
+                    *some
+                } else {
+                    traffic.altitude()
+                };
+
                 let traffic_coord = earth.coordinate(
                     traffic.latitude(),
                     traffic.longitude(),
-                    traffic.altitude() * 0.3048
+                    alt * 0.3048
                 );
 
                 let traffic_heading = traffic.heading();
@@ -1728,11 +1750,17 @@ fn main() {
                 w.line(center.0 - 5, center.1, center.0 + 5, center.1, hud_color);
                 w.line(center.0, center.1 - 5, center.0, center.1 + 5, hud_color);
 
-                for (id, traffic) in &traffics {
+                for (id, (traffic, alt_override)) in &traffics {
+                    let alt = if let Some(some) = alt_override {
+                        *some
+                    } else {
+                        traffic.altitude()
+                    };
+
                     let traffic_coord = earth.coordinate(
                         traffic.latitude(),
                         traffic.longitude(),
-                        traffic.altitude() * 0.3048
+                        alt * 0.3048
                     );
                     let traffic_pos = traffic_coord.position();
                     let traffic_ground = ground_perspective.transform(&traffic_pos);
