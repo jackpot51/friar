@@ -622,7 +622,27 @@ fn hgt_intersect<'r, R: Spheroid>(file: &HgtFile, reference: &'r R, origin: &Coo
     }
 }
 
-fn hgt<'r, R: Spheroid + Sync>(file: &HgtFile, reference: &'r R, bounds: (f64, f64, f64, f64), tiles: &mut Vec<(Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>)>) {
+//   au bu
+// al a b br
+// cl c d dr
+//   cd dd
+
+struct HgtTile<'r, R: Spheroid + 'r> {
+    a: Coordinate<'r, R>,
+    b: Coordinate<'r, R>,
+    c: Coordinate<'r, R>,
+    d: Coordinate<'r, R>,
+    au: Option<Coordinate<'r, R>>,
+    bu: Option<Coordinate<'r, R>>,
+    al: Option<Coordinate<'r, R>>,
+    cl: Option<Coordinate<'r, R>>,
+    cd: Option<Coordinate<'r, R>>,
+    dd: Option<Coordinate<'r, R>>,
+    br: Option<Coordinate<'r, R>>,
+    dr: Option<Coordinate<'r, R>>,
+}
+
+fn hgt<'r, R: Spheroid + Sync>(file: &HgtFile, reference: &'r R, bounds: (f64, f64, f64, f64), tiles: &mut Vec<HgtTile<'r, R>>) {
     let samples = file.resolution.samples();
 
     let min = file.coordinate(1, 1).unwrap();
@@ -642,29 +662,52 @@ fn hgt<'r, R: Spheroid + Sync>(file: &HgtFile, reference: &'r R, bounds: (f64, f
 
         let cells = (rows as u32) * (cols as u32);
 
-        let cell_map = |cell: u32| -> Option<(Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>, Coordinate<'r, R>)> {
+        let cell_map = |cell: u32| -> Option<HgtTile<'r, R>> {
             let row = ((cell / (cols as u32)) as u16) + start_row + 1;
             let prev_row = row - 1;
 
             let col = ((cell % (cols as u32)) as u16) + start_col + 1;
             let prev_col = col - 1;
 
-            let ah = file.get(prev_row, prev_col)? as f64;
-            let bh = file.get(prev_row, col)? as f64;
-            let ch = file.get(row, prev_col)? as f64;
-            let dh = file.get(row, col)? as f64;
+            let coord = |row, col| -> Option<Coordinate<'r, R>> {
+                let h = file.get(row, col)?;
+                let (lat, lon) = file.coordinate(row, col)?;
+                Some(reference.coordinate(lat, lon, h as f64))
+            };
 
-            let af = file.coordinate(prev_row, prev_col)?;
-            let bf = file.coordinate(prev_row, col)?;
-            let cf = file.coordinate(row, prev_col)?;
-            let df = file.coordinate(row, col)?;
+            let a = coord(prev_row, prev_col)?;
+            let b = coord(prev_row, col)?;
+            let c = coord(row, prev_col)?;
+            let d = coord(row, col)?;
 
-            let a = reference.coordinate(af.0, af.1, ah);
-            let b = reference.coordinate(bf.0, bf.1, bh);
-            let c = reference.coordinate(cf.0, cf.1, ch);
-            let d = reference.coordinate(df.0, df.1, dh);
+            let (au, bu) = if prev_row > 1 {
+                (coord(prev_row - 1, prev_col), coord(prev_row - 1, col))
+            } else {
+                (None, None)
+            };
 
-            Some((a, b, c, d))
+            let (al, cl) = if prev_col > 1 {
+                (coord(prev_row, prev_col - 1), coord(row, prev_col - 1))
+            } else {
+                (None, None)
+            };
+
+            let (cd, dd) = if row < samples - 1 {
+                (coord(row + 1, prev_col), coord(row + 1, col))
+            } else {
+                (None, None)
+            };
+
+            let (br, dr) = if col < samples - 1 {
+                (coord(prev_row, col + 1), coord(row, col + 1))
+            } else {
+                (None, None)
+            };
+
+            Some(HgtTile {
+                a, b, c, d,
+                au, bu, al, cl, cd, dd, br, dr
+            })
         };
 
         tiles.par_extend((0..cells).into_par_iter().filter_map(cell_map));
@@ -724,8 +767,8 @@ fn main() {
     } else {
         (
             //39.856096, -104.673727, true // Denver International Airport
-            //37.619268, -112.166357, true // Bryce Canyon
-            39.639720, -104.854705, true // Cherry Creek Reservoir
+            37.619268, -112.166357, true // Bryce Canyon
+            //39.639720, -104.854705, true // Cherry Creek Reservoir
             //39.588303, -105.643829, true // Mount Evans
             //39.610061, -106.056893, true // Dillon Reservoir
             //39.739230, -104.987403, true // Downtown Denver
@@ -1379,23 +1422,57 @@ fn main() {
             let intensity = |p1: &Position<Earth>, p2: &Position<Earth>, p3: &Position<Earth>| -> f32 {
                 let v12 = p1.vector(&p2);
                 let v13 = p1.vector(&p3);
+
                 let dot = v12.cross(&v13).normalize().dot(&down_vec);
                 dot.powi(10) as f32
             };
 
+            let intensity_intense = |p1: &Position<Earth>, p2: &Position<Earth>, p3: &Position<Earth>, c4_opt: &Option<Coordinate<Earth>>, c5_opt: &Option<Coordinate<Earth>>| -> f32 {
+                let mut int = intensity(p1, p2, p3);
+                let mut count = 1.0;
+
+                if let Some(c4) = c4_opt {
+                    let p4 = c4.position();
+                    int += intensity(p1, p3, &p4);
+                    count += 1.0;
+
+                    if let Some(c5) = c5_opt {
+                        let p5 = c5.position();
+                        int += intensity(p1, &p4, &p5);
+                        count += 1.0;
+                    }
+                }
+
+                if let Some(c5) = c5_opt {
+                    let p5 = c5.position();
+                    int += intensity(p1, &p5, p2);
+                    count += 1.0;
+                }
+
+                int/count
+            };
+
             hgt_triangles.clear();
             for tile in hgt_tiles.iter() {
-                let (a, b, c, d) = tile;
+                let a = &tile.a;
+                let b = &tile.b;
+                let c = &tile.c;
+                let d = &tile.d;
 
                 let a_pos = a.position();
                 let b_pos = b.position();
                 let c_pos = c.position();
                 let d_pos = d.position();
 
-                let a_int = intensity(&a_pos, &c_pos, &b_pos);
-                let b_int = intensity(&b_pos, &a_pos, &d_pos);
-                let c_int = intensity(&c_pos, &d_pos, &a_pos);
-                let d_int = intensity(&d_pos, &b_pos, &c_pos);
+                //   au bu
+                // al a b br
+                // cl c d dr
+                //   cd dd
+
+                let a_int = intensity_intense(&a_pos, &c_pos, &b_pos, &tile.au, &tile.al);
+                let b_int = intensity_intense(&b_pos, &a_pos, &d_pos, &tile.br, &tile.bu);
+                let c_int = intensity_intense(&c_pos, &d_pos, &a_pos, &tile.cl, &tile.cd);
+                let d_int = intensity_intense(&d_pos, &b_pos, &c_pos, &tile.dd, &tile.dr);
 
                 {
                     let low = a.elevation.min(b.elevation).min(c.elevation);
