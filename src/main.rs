@@ -622,107 +622,241 @@ fn hgt_intersect<'r, R: Spheroid>(file: &HgtFile, reference: &'r R, origin: &Coo
     }
 }
 
-//   au bu
-// al a b br
-// cl c d dr
-//   cd dd
+type HgtTriangle<'r, R> = (Position<'r, R>, Position<'r, R>, Position<'r, R>, (f32, f32, f32), (u8, u8, u8));
 
-struct HgtTile<'r, R: Spheroid + 'r> {
-    a: Coordinate<'r, R>,
-    b: Coordinate<'r, R>,
-    c: Coordinate<'r, R>,
-    d: Coordinate<'r, R>,
-    au: Option<Coordinate<'r, R>>,
-    bu: Option<Coordinate<'r, R>>,
-    al: Option<Coordinate<'r, R>>,
-    cl: Option<Coordinate<'r, R>>,
-    cd: Option<Coordinate<'r, R>>,
-    dd: Option<Coordinate<'r, R>>,
-    br: Option<Coordinate<'r, R>>,
-    dr: Option<Coordinate<'r, R>>,
+type HgtTile<'r, R> = (HgtTriangle<'r, R>, HgtTriangle<'r, R>);
+
+struct HgtFileTiles<'r, R: Spheroid + 'r> {
+    file: HgtFile,
+    tiles: Box<[Box<[Option<HgtTile<'r, R>>]>]>
 }
 
-fn hgt<'r, R: Spheroid + Sync>(file: &HgtFile, reference: &'r R, bounds: (f64, f64, f64, f64), tiles: &mut Vec<HgtTile<'r, R>>) {
-    let samples = file.resolution.samples();
+impl<'r, R: Spheroid + Sync> HgtFileTiles<'r, R> {
+    fn new(file: HgtFile, reference: &'r R, ground_color: Color, ocean_color: Color) -> Self {
+        let samples = file.resolution.samples();
 
-    let min = file.coordinate(1, 1).unwrap();
-    let max = file.coordinate(samples - 1, samples - 1).unwrap();
-
-    let start = file.position(bounds.0.min(max.0).max(min.0), bounds.1.min(max.1).max(min.1)).unwrap();
-    let end = file.position(bounds.2.min(max.0).max(min.0), bounds.3.min(max.1).max(min.1)).unwrap();
-
-    let start_row = cmp::max(1, start.0);
-    let start_col = cmp::max(1, start.1);
-    let end_row = cmp::min(samples - 1, end.0);
-    let end_col = cmp::min(samples - 1, end.1);
-
-    if end_row > start_row && end_col > start_col {
-        let rows = end_row - (start_row + 1);
-        let cols = end_col - (start_col + 1);
-
-        let cells = (rows as u32) * (cols as u32);
-
-        let cell_map = |cell: u32| -> Option<HgtTile<'r, R>> {
-            let row = ((cell / (cols as u32)) as u16) + start_row + 1;
-            let prev_row = row - 1;
-
-            let col = ((cell % (cols as u32)) as u16) + start_col + 1;
-            let prev_col = col - 1;
-
-            let coord = |row, col| -> Option<Coordinate<'r, R>> {
-                let h = file.get(row, col)?;
-                let (lat, lon) = file.coordinate(row, col)?;
-                Some(reference.coordinate(lat, lon, h as f64))
-            };
-
-            let a = coord(prev_row, prev_col)?;
-            let b = coord(prev_row, col)?;
-            let c = coord(row, prev_col)?;
-            let d = coord(row, col)?;
-
-            let (au, bu) = if prev_row > 1 {
-                (coord(prev_row - 1, prev_col), coord(prev_row - 1, col))
+        let rgb = |low: f64, high: f64| -> (u8, u8, u8) {
+            let scale = 1.0; //(1.0 - (high - low).log2() * 0.125).max(0.125).min(1.0);
+            let color = if low.abs() < 1.0 && high.abs() < 1.0 {
+                ocean_color
             } else {
-                (None, None)
+                ground_color
             };
-
-            let (al, cl) = if prev_col > 1 {
-                (coord(prev_row, prev_col - 1), coord(row, prev_col - 1))
-            } else {
-                (None, None)
-            };
-
-            let (cd, dd) = if row < samples - 1 {
-                (coord(row + 1, prev_col), coord(row + 1, col))
-            } else {
-                (None, None)
-            };
-
-            let (br, dr) = if col < samples - 1 {
-                (coord(prev_row, col + 1), coord(row, col + 1))
-            } else {
-                (None, None)
-            };
-
-            Some(HgtTile {
-                a, b, c, d,
-                au, bu, al, cl, cd, dd, br, dr
-            })
+            (
+                (color.r() as f64 * scale) as u8,
+                (color.g() as f64 * scale) as u8,
+                (color.b() as f64 * scale) as u8
+            )
         };
 
-        tiles.par_extend((0..cells).into_par_iter().filter_map(cell_map));
+        let (center_lat, center_lon) = file.coordinate(samples/2, samples/2).unwrap();
+        let center = reference.coordinate(center_lat, center_lon, 0.0);
+        let center_pos = center.position();
+
+        let down = center.offset(1.0, 0.0, 270.0);
+        let down_pos = down.position();
+        let down_vec = center_pos.vector(&down_pos).normalize();
+
+        let intensity = |p1: &Position<'r, R>, p2: &Position<'r, R>, p3: &Position<'r, R>| -> f32 {
+            let v12 = p1.vector(&p2);
+            let v13 = p1.vector(&p3);
+
+            let dot = v12.cross(&v13).normalize().dot(&down_vec);
+            dot.powi(10) as f32
+        };
+
+        let intensity_intense = |p1: &Position<'r, R>, p2: &Position<'r, R>, p3: &Position<'r, R>, c4_opt: &Option<Coordinate<'r, R>>, c5_opt: &Option<Coordinate<'r, R>>| -> f32 {
+            let mut int = intensity(p1, p2, p3);
+            let mut count = 1.0;
+
+            if let Some(c4) = c4_opt {
+                let p4 = c4.position();
+                int += intensity(p1, p3, &p4);
+                count += 1.0;
+
+                if let Some(c5) = c5_opt {
+                    let p5 = c5.position();
+                    int += intensity(p1, &p4, &p5);
+                    count += 1.0;
+                }
+            }
+
+            if let Some(c5) = c5_opt {
+                let p5 = c5.position();
+                int += intensity(p1, &p5, p2);
+                count += 1.0;
+            }
+
+            int/count
+        };
+
+        let mut tiles = Vec::with_capacity(samples as usize);
+        {
+            let cell_map = |row: u16, col: u16| -> Option<HgtTile<'r, R>> {
+                let prev_row = row - 1;
+                let prev_col = col - 1;
+
+                let coord = |row, col| -> Option<Coordinate<'r, R>> {
+                    let h = file.get(row, col)?;
+                    let (lat, lon) = file.coordinate(row, col)?;
+                    Some(reference.coordinate(lat, lon, h as f64))
+                };
+
+                //   au bu
+                // al a b br
+                // cl c d dr
+                //   cd dd
+
+                let a = coord(prev_row, prev_col)?;
+                let b = coord(prev_row, col)?;
+                let c = coord(row, prev_col)?;
+                let d = coord(row, col)?;
+
+                let (au, bu) = if prev_row > 1 {
+                    (coord(prev_row - 1, prev_col), coord(prev_row - 1, col))
+                } else {
+                    (None, None)
+                };
+
+                let (al, cl) = if prev_col > 1 {
+                    (coord(prev_row, prev_col - 1), coord(row, prev_col - 1))
+                } else {
+                    (None, None)
+                };
+
+                let (cd, dd) = if row < samples - 1 {
+                    (coord(row + 1, prev_col), coord(row + 1, col))
+                } else {
+                    (None, None)
+                };
+
+                let (br, dr) = if col < samples - 1 {
+                    (coord(prev_row, col + 1), coord(row, col + 1))
+                } else {
+                    (None, None)
+                };
+
+                let a_pos = a.position();
+                let b_pos = b.position();
+                let c_pos = c.position();
+                let d_pos = d.position();
+
+                //   au bu
+                // al a b br
+                // cl c d dr
+                //   cd dd
+
+                let a_int = intensity_intense(&a_pos, &c_pos, &b_pos, &au, &al);
+                let b_int = intensity_intense(&b_pos, &a_pos, &d_pos, &br, &bu);
+                let c_int = intensity_intense(&c_pos, &d_pos, &a_pos, &cl, &cd);
+                let d_int = intensity_intense(&d_pos, &b_pos, &c_pos, &dd, &dr);
+
+                let abc = {
+                    let low = a.elevation.min(b.elevation).min(c.elevation);
+                    let high = a.elevation.max(b.elevation).max(c.elevation);
+
+                    (
+                        a_pos,
+                        b_pos.duplicate(),
+                        c_pos.duplicate(),
+                        (
+                            a_int,
+                            b_int,
+                            c_int,
+                        ),
+                        rgb(low, high),
+                    )
+                };
+
+                let bcd = {
+                    let low = b.elevation.min(c.elevation).min(d.elevation);
+                    let high = b.elevation.max(c.elevation).max(d.elevation);
+
+                    (
+                        b_pos,
+                        c_pos,
+                        d_pos,
+                        (
+                            b_int,
+                            c_int,
+                            d_int,
+                        ),
+                        rgb(low, high),
+                    )
+                };
+
+                Some((abc, bcd))
+            };
+
+            for row in 2..samples {
+                let mut tiles_row = Vec::with_capacity(samples as usize);
+                for col in 2..samples {
+                    tiles_row.push(cell_map(row, col));
+                }
+                tiles.push(tiles_row.into_boxed_slice());
+            }
+        }
+
+        Self {
+            file,
+            tiles: tiles.into_boxed_slice()
+        }
+    }
+
+    fn triangles(&self, bounds: (f64, f64, f64, f64), triangles: &mut Vec<HgtTriangle<'r, R>>) {
+        let samples = self.file.resolution.samples();
+
+        let min = self.file.coordinate(1, 1).unwrap();
+        let max = self.file.coordinate(samples - 1, samples - 1).unwrap();
+
+        let start = self.file.position(bounds.0.min(max.0).max(min.0), bounds.1.min(max.1).max(min.1)).unwrap();
+        let end = self.file.position(bounds.2.min(max.0).max(min.0), bounds.3.min(max.1).max(min.1)).unwrap();
+
+        let start_row = cmp::max(1, start.0);
+        let start_col = cmp::max(1, start.1);
+        let end_row = cmp::min(samples - 1, end.0);
+        let end_col = cmp::min(samples - 1, end.1);
+
+        if end_row > start_row && end_col > start_col {
+            let mut push = |triangle: &HgtTriangle<'r, R>| {
+                triangles.push((
+                    triangle.0.duplicate(),
+                    triangle.1.duplicate(),
+                    triangle.2.duplicate(),
+                    triangle.3,
+                    triangle.4
+                ));
+            };
+
+            for row in start_row..end_row + 1 {
+                if let Some(tiles_row) = self.tiles.get(row as usize) {
+                    for col in start_col..end_col + 1 {
+                        if let Some(tile_opt) = tiles_row.get(col as usize) {
+                            if let Some(tile) = tile_opt {
+                                push(&tile.0);
+                                push(&tile.1);
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
     }
 }
 
-fn hgt_nearby_files(cache: &HgtCache, latitude: f64, longitude: f64, res: HgtResolution) -> [HgtFile; 5] {
+fn hgt_nearby_files<'r, R: Spheroid + Sync>(cache: &HgtCache, latitude: f64, longitude: f64, res: HgtResolution, reference: &'r R, ground_color: Color, ocean_color: Color) -> [HgtFileTiles<'r, R>; 5] {
     let f = latitude.floor();
     let l = longitude.floor();
     [
-        cache.get(f, l, res).unwrap(),
-        cache.get(f - 1.0, l, res).unwrap(),
-        cache.get(f, l - 1.0, res).unwrap(),
-        cache.get(f + 1.0, l, res).unwrap(),
-        cache.get(f, l + 1.0, res).unwrap(),
+        HgtFileTiles::new(cache.get(f, l, res).unwrap(), reference, ground_color, ocean_color),
+        HgtFileTiles::new(cache.get(f - 1.0, l, res).unwrap(), reference, ground_color, ocean_color),
+        HgtFileTiles::new(cache.get(f, l - 1.0, res).unwrap(), reference, ground_color, ocean_color),
+        HgtFileTiles::new(cache.get(f + 1.0, l, res).unwrap(), reference, ground_color, ocean_color),
+        HgtFileTiles::new(cache.get(f, l + 1.0, res).unwrap(), reference, ground_color, ocean_color),
     ]
 }
 
@@ -767,7 +901,7 @@ fn main() {
     } else {
         (
             //39.856096, -104.673727, true // Denver International Airport
-            37.619268, -112.166357, true // Bryce Canyon
+            37.619268, -112.166357, false // Bryce Canyon
             //39.639720, -104.854705, true // Cherry Creek Reservoir
             //39.588303, -105.643829, true // Mount Evans
             //39.610061, -106.056893, true // Dillon Reservoir
@@ -779,18 +913,18 @@ fn main() {
     };
 
     let (hgt_res, hgt_horizon) = if center_res {
-        (HgtResolution::One, 4000.0)
+        (HgtResolution::One, 8000.0)
     } else {
-        (HgtResolution::Three, 8000.0)
+        (HgtResolution::Three, 16000.0)
     };
 
     let hgt_cache = HgtCache::new("cache");
 
-    let mut hgt_files = hgt_nearby_files(&hgt_cache, center_lat, center_lon, hgt_res);
+    let mut hgt_files = hgt_nearby_files(&hgt_cache, center_lat, center_lon, hgt_res, &earth, ground_color, ocean_color);
 
     let ground = if let Some(hgt_file) = hgt_files.get(0) {
-        if let Some((row, col)) = hgt_file.position(center_lat, center_lon) {
-            hgt_file.get(row, col).unwrap_or(0) as f64
+        if let Some((row, col)) = hgt_file.file.position(center_lat, center_lon) {
+            hgt_file.file.get(row, col).unwrap_or(0) as f64
         } else {
             0.0f64
         }
@@ -813,7 +947,6 @@ fn main() {
     println!("FOV: {}", original_fov);
     println!("OSM: {},{},{},{}", osm_sw.longitude, osm_sw.latitude, osm_ne.longitude, osm_ne.latitude);
 
-    let mut hgt_tiles = Vec::new();
     let mut hgt_triangles = Vec::new();
     let mut osm_triangles = Vec::new();
     /*osm(
@@ -1282,7 +1415,7 @@ fn main() {
             reintersect = false;
 
             intersect_opt = if let Some(hgt_file) = hgt_files.get(0) {
-                hgt_intersect(hgt_file, &earth, &viewer, intersect_heading, intersect_pitch)
+                hgt_intersect(&hgt_file.file, &earth, &viewer, intersect_heading, intersect_pitch)
             } else {
                 None
             };
@@ -1379,134 +1512,25 @@ fn main() {
             let viewer_ne = viewer.offset(hgt_horizon, 45.0, 0.0);
 
             let reload_hgt_files = if let Some(hgt_file) = hgt_files.get(0) {
-                hgt_file.position(viewer.latitude, viewer.longitude).is_none()
+                hgt_file.file.position(viewer.latitude, viewer.longitude).is_none()
             } else {
                 false
             };
 
             if reload_hgt_files {
-                hgt_files = hgt_nearby_files(&hgt_cache, viewer.latitude, viewer.longitude, hgt_res);
+                hgt_files = hgt_nearby_files(&hgt_cache, viewer.latitude, viewer.longitude, hgt_res, &earth, ground_color, ocean_color);
             }
-
-            hgt_tiles.clear();
-            for hgt_file in hgt_files.iter() {
-                hgt(
-                    &hgt_file,
-                    &earth,
-                    (
-                        viewer_sw.latitude, viewer_sw.longitude,
-                        viewer_ne.latitude, viewer_ne.longitude,
-                    ),
-                    &mut hgt_tiles
-                );
-            }
-
-            let rgb = |low: f64, high: f64| -> (u8, u8, u8) {
-                let scale = 1.0; //(1.0 - (high - low).log2() * 0.125).max(0.125).min(1.0);
-                let color = if low.abs() < 1.0 && high.abs() < 1.0 {
-                    ocean_color
-                } else {
-                    ground_color
-                };
-                (
-                    (color.r() as f64 * scale) as u8,
-                    (color.g() as f64 * scale) as u8,
-                    (color.b() as f64 * scale) as u8
-                )
-            };
-
-            let down = viewer.offset(1.0, 0.0, 270.0);
-            let down_pos = down.position();
-            let down_vec = viewer_pos.vector(&down_pos).normalize();
-
-            let intensity = |p1: &Position<Earth>, p2: &Position<Earth>, p3: &Position<Earth>| -> f32 {
-                let v12 = p1.vector(&p2);
-                let v13 = p1.vector(&p3);
-
-                let dot = v12.cross(&v13).normalize().dot(&down_vec);
-                dot.powi(10) as f32
-            };
-
-            let intensity_intense = |p1: &Position<Earth>, p2: &Position<Earth>, p3: &Position<Earth>, c4_opt: &Option<Coordinate<Earth>>, c5_opt: &Option<Coordinate<Earth>>| -> f32 {
-                let mut int = intensity(p1, p2, p3);
-                let mut count = 1.0;
-
-                if let Some(c4) = c4_opt {
-                    let p4 = c4.position();
-                    int += intensity(p1, p3, &p4);
-                    count += 1.0;
-
-                    if let Some(c5) = c5_opt {
-                        let p5 = c5.position();
-                        int += intensity(p1, &p4, &p5);
-                        count += 1.0;
-                    }
-                }
-
-                if let Some(c5) = c5_opt {
-                    let p5 = c5.position();
-                    int += intensity(p1, &p5, p2);
-                    count += 1.0;
-                }
-
-                int/count
-            };
 
             hgt_triangles.clear();
-            for tile in hgt_tiles.iter() {
-                let a = &tile.a;
-                let b = &tile.b;
-                let c = &tile.c;
-                let d = &tile.d;
+            for hgt_file in hgt_files.iter() {
+                let bounds = (
+                    viewer_sw.latitude,
+                    viewer_sw.longitude,
+                    viewer_ne.latitude,
+                    viewer_ne.longitude
+                );
 
-                let a_pos = a.position();
-                let b_pos = b.position();
-                let c_pos = c.position();
-                let d_pos = d.position();
-
-                //   au bu
-                // al a b br
-                // cl c d dr
-                //   cd dd
-
-                let a_int = intensity_intense(&a_pos, &c_pos, &b_pos, &tile.au, &tile.al);
-                let b_int = intensity_intense(&b_pos, &a_pos, &d_pos, &tile.br, &tile.bu);
-                let c_int = intensity_intense(&c_pos, &d_pos, &a_pos, &tile.cl, &tile.cd);
-                let d_int = intensity_intense(&d_pos, &b_pos, &c_pos, &tile.dd, &tile.dr);
-
-                {
-                    let low = a.elevation.min(b.elevation).min(c.elevation);
-                    let high = a.elevation.max(b.elevation).max(c.elevation);
-
-                    hgt_triangles.push((
-                        a_pos,
-                        b_pos.duplicate(),
-                        c_pos.duplicate(),
-                        (
-                            a_int,
-                            b_int,
-                            c_int,
-                        ),
-                        rgb(low, high),
-                    ));
-                };
-
-                {
-                    let low = b.elevation.min(c.elevation).min(d.elevation);
-                    let high = b.elevation.max(c.elevation).max(d.elevation);
-
-                    hgt_triangles.push((
-                        b_pos,
-                        c_pos,
-                        d_pos,
-                        (
-                            b_int,
-                            c_int,
-                            d_int,
-                        ),
-                        rgb(low, high),
-                    ));
-                };
+                hgt_file.triangles(bounds, &mut hgt_triangles);
             }
 
             redraw = true;
@@ -1694,8 +1718,6 @@ fn main() {
             }
 
             {
-                //let vfov = fov * (w_w as f64)/(w_h as f64);
-
                 let mut h = 0;
                 while h < 360 {
                     let h_coord = viewer.offset(1.0, h as f64, 0.0);
