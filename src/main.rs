@@ -1012,6 +1012,7 @@ fn main() {
     let mut redraw = true;
     let mut redraw_times = 2;
     let mut fill = true;
+    let mut hud = true;
     let mut z_buffer = vec![0.0; (w.width() * w.height()) as usize];
     let mut triangles = Vec::with_capacity(hgt_triangles.len() + osm_triangles.len() + intersect_triangles.len());
 
@@ -1101,12 +1102,16 @@ fn main() {
                             redraw = true;
                         },
 
+                        orbclient::K_B if key_event.pressed => {
+                            debug = !debug;
+                            redraw = true;
+                        },
                         orbclient::K_F if key_event.pressed => {
                             fill = !fill;
                             redraw = true;
                         },
-                        orbclient::K_B if key_event.pressed => {
-                            debug = !debug;
+                        orbclient::K_H if key_event.pressed => {
+                            hud = !hud;
                             redraw = true;
                         },
 
@@ -1630,14 +1635,20 @@ fn main() {
                 ))
             };
 
-            triangles.clear();
-            triangles.par_extend(
-                hgt_triangles.par_iter()
-                    .chain(osm_triangles.par_iter())
-                    .chain(traffic_triangles.par_iter())
-                    .chain(intersect_triangles.par_iter())
-                    .filter_map(triangle_map)
-            );
+            {
+                let timer = Timer::new("transform", debug);
+
+                triangles.clear();
+                triangles.par_extend(
+                    hgt_triangles.par_iter()
+                        .chain(osm_triangles.par_iter())
+                        .chain(traffic_triangles.par_iter())
+                        .chain(intersect_triangles.par_iter())
+                        .filter_map(triangle_map)
+                );
+
+                drop(timer);
+            }
 
             w.set(sky_color);
 
@@ -1715,15 +1726,23 @@ fn main() {
                 }
             }
 
-            for (triangle, color) in triangles.iter() {
-                if fill {
-                    triangle.fill(&mut w, &mut z_buffer, *color);
-                } else {
-                    triangle.draw(&mut w, *color);
+            {
+                let timer = Timer::new("fill", debug);
+
+                for (triangle, color) in triangles.iter() {
+                    if fill {
+                        triangle.fill(&mut w, &mut z_buffer, *color);
+                    } else {
+                        triangle.draw(&mut w, *color);
+                    }
                 }
+
+                drop(timer);
             }
 
-            {
+            if hud {
+                let timer = Timer::new("hud", debug);
+
                 let mut h = 0;
                 while h < 360 {
                     let h_coord = viewer.offset(1.0, h as f64, 0.0);
@@ -1941,6 +1960,8 @@ fn main() {
                         );
                     }
                 }
+
+                drop(timer);
             }
 
             if debug {
