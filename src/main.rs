@@ -900,15 +900,21 @@ fn main() {
         }
     } else {
         (
-            //39.856096, -104.673727, true // Denver International Airport
-            37.619268, -112.166357, false // Bryce Canyon
-            //39.639720, -104.854705, true // Cherry Creek Reservoir
-            //39.588303, -105.643829, true // Mount Evans
+            //37.619268, -112.166357, true // Bryce Canyon
             //39.610061, -106.056893, true // Dillon Reservoir
+            //39.588303, -105.643829, true // Mount Evans
             //39.739230, -104.987403, true // Downtown Denver
+            //39.639720, -104.854705, true // Cherry Creek Reservoir
+            //39.856096, -104.673727, true // Denver International Airport
+            //46.306415, 7.791639, false // Raron
             //40.573420, 14.297834, false // Capri
-            //40.633537, 14.602547, false // Amalfi
             //40.821181, 14.426308, false // Mount Vesuvius
+            //40.633537, 14.602547, false // Amalfi
+            //27.988140, 86.925178, false // Mount Everest
+            //38.876495, 100.006865, false // Zhangye Danxia
+            //29.315328, 110.434751, false // Zhangjiajie
+            //30.242933, 120.150318, false // Xihu
+            35.363486, 138.730486, false // Mount Fuji
         )
     };
 
