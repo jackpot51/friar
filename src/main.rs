@@ -848,9 +848,38 @@ impl<'r, R: Spheroid + Sync> HgtFileTiles<'r, R> {
     }
 }
 
-fn hgt_nearby_files<'r, R: Spheroid + Sync>(cache: &HgtCache, latitude: f64, longitude: f64, res: HgtResolution, reference: &'r R, ground_color: Color, ocean_color: Color) -> [HgtFileTiles<'r, R>; 5] {
+fn hgt_nearby_files<'r, R: Spheroid + Sync>(cache: &HgtCache, latitude: f64, longitude: f64, res: HgtResolution, reference: &'r R, ground_color: Color, ocean_color: Color) -> Box<[HgtFileTiles<'r, R>]> {
     let f = latitude.floor();
     let l = longitude.floor();
+
+    let mut hgt_files_par = Vec::with_capacity(5);
+    hgt_files_par.par_extend(
+        [
+            (f, l, 0),
+            (f - 1.0, l, 1),
+            (f, l - 1.0, 2),
+            (f + 1.0, l, 3),
+            (f, l + 1.0, 4)
+        ].par_iter()
+        .map(|coord| {
+            (
+                HgtFileTiles::new(cache.get(coord.0, coord.1, res).unwrap(), reference, ground_color, ocean_color),
+                coord.2
+            )
+        })
+    );
+
+    hgt_files_par.par_sort_by(|a, b| {
+        a.1.cmp(&b.1)
+    });
+
+    let mut hgt_files = Vec::with_capacity(hgt_files_par.len());
+    for (hgt_file, _) in hgt_files_par {
+        hgt_files.push(hgt_file);
+    }
+    hgt_files.into_boxed_slice()
+
+    /*
     [
         HgtFileTiles::new(cache.get(f, l, res).unwrap(), reference, ground_color, ocean_color),
         HgtFileTiles::new(cache.get(f - 1.0, l, res).unwrap(), reference, ground_color, ocean_color),
@@ -858,6 +887,7 @@ fn hgt_nearby_files<'r, R: Spheroid + Sync>(cache: &HgtCache, latitude: f64, lon
         HgtFileTiles::new(cache.get(f + 1.0, l, res).unwrap(), reference, ground_color, ocean_color),
         HgtFileTiles::new(cache.get(f, l + 1.0, res).unwrap(), reference, ground_color, ocean_color),
     ]
+    */
 }
 
 
@@ -904,7 +934,7 @@ fn main() {
             //39.610061, -106.056893, true // Dillon Reservoir
             //39.588303, -105.643829, true // Mount Evans
             //39.739230, -104.987403, true // Downtown Denver
-            //39.639720, -104.854705, true // Cherry Creek Reservoir
+            39.639720, -104.854705, true // Cherry Creek Reservoir
             //39.856096, -104.673727, true // Denver International Airport
             //46.306415, 7.791639, false // Raron
             //40.573420, 14.297834, false // Capri
@@ -914,7 +944,7 @@ fn main() {
             //38.876495, 100.006865, false // Zhangye Danxia
             //29.315328, 110.434751, false // Zhangjiajie
             //30.242933, 120.150318, false // Xihu
-            35.363486, 138.730486, false // Mount Fuji
+            //35.363486, 138.730486, false // Mount Fuji
         )
     };
 
