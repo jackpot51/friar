@@ -76,7 +76,7 @@ impl<'r, R: Spheroid> Position<'r, R> {
         let p = (x.powi(2) + y.powi(2)).sqrt();
         let th = (a * z).atan2(b * p);
 
-        let lon = y.atan2(x).mod_euc(2.0 * f64::consts::PI);
+        let lon = y.atan2(x).rem_euclid(2.0 * f64::consts::PI);
         let lat = (z + ep.powi(2) * b * th.sin().powi(3)).atan2(p - esq * a * th.cos().powi(3));
         let N = a / (1.0 - esq * lat.sin().powi(2)).sqrt();
         let alt = p / lat.cos() - N;

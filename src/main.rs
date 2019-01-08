@@ -1197,36 +1197,36 @@ fn main() {
             }
 
             if rotate_left {
-                heading = (heading - speed_rot * roll.to_radians().cos()).mod_euc(360.0);
-                pitch = (pitch - speed_rot * roll.to_radians().sin()).mod_euc(360.0);
+                heading = (heading - speed_rot * roll.to_radians().cos()).rem_euclid(360.0);
+                pitch = (pitch - speed_rot * roll.to_radians().sin()).rem_euclid(360.0);
                 redraw = true;
             }
 
             if rotate_right {
-                heading = (heading + speed_rot * roll.to_radians().cos()).mod_euc(360.0);
-                pitch = (pitch + speed_rot * roll.to_radians().sin()).mod_euc(360.0);
+                heading = (heading + speed_rot * roll.to_radians().cos()).rem_euclid(360.0);
+                pitch = (pitch + speed_rot * roll.to_radians().sin()).rem_euclid(360.0);
                 redraw = true;
             }
 
             if rotate_up {
-                heading = (heading - speed_rot * roll.to_radians().sin()).mod_euc(360.0);
-                pitch = (pitch + speed_rot * roll.to_radians().cos()).mod_euc(360.0);
+                heading = (heading - speed_rot * roll.to_radians().sin()).rem_euclid(360.0);
+                pitch = (pitch + speed_rot * roll.to_radians().cos()).rem_euclid(360.0);
                 redraw = true;
             }
 
             if rotate_down {
-                heading = (heading + speed_rot * roll.to_radians().sin()).mod_euc(360.0);
-                pitch = (pitch - speed_rot * roll.to_radians().cos()).mod_euc(360.0);
+                heading = (heading + speed_rot * roll.to_radians().sin()).rem_euclid(360.0);
+                pitch = (pitch - speed_rot * roll.to_radians().cos()).rem_euclid(360.0);
                 redraw = true;
             }
 
             if roll_left {
-                roll = (roll + speed_rot).mod_euc(360.0);
+                roll = (roll + speed_rot).rem_euclid(360.0);
                 redraw = true;
             }
 
             if roll_right {
-                roll = (roll - speed_rot).mod_euc(360.0);
+                roll = (roll - speed_rot).rem_euclid(360.0);
                 redraw = true;
             }
 

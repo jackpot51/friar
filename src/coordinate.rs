@@ -79,7 +79,7 @@ impl<'r, R: Spheroid> Coordinate<'r, R> {
             (l2 - l1).sin() * f2.cos()
         ).atan2(
             f1.cos() * f2.sin() - f1.sin() * f2.cos() * (l2 - l1).cos()
-        ).mod_euc(2.0 * f64::consts::PI).to_degrees()
+        ).rem_euclid(2.0 * f64::consts::PI).to_degrees()
     }
 
     pub fn pitch(&self, to: &Self) -> f64 {
@@ -107,7 +107,7 @@ impl<'r, R: Spheroid> Coordinate<'r, R> {
         );
         let l2 = (
             l1 + dl + f64::consts::PI
-        ).mod_euc(2.0 * f64::consts::PI) - f64::consts::PI;
+        ).rem_euclid(2.0 * f64::consts::PI) - f64::consts::PI;
 
         Self {
             reference: self.reference,
@@ -145,8 +145,8 @@ impl<'r, R: Spheroid> Coordinate<'r, R> {
         let l = self.longitude.to_radians();
 
         let rx = 0.0f64;
-        let ry = (f + f64::consts::PI/2.0).mod_euc(2.0 * f64::consts::PI);
-        let rz = (l + f64::consts::PI).mod_euc(2.0 * f64::consts::PI);
+        let ry = (f + f64::consts::PI/2.0).rem_euclid(2.0 * f64::consts::PI);
+        let rz = (l + f64::consts::PI).rem_euclid(2.0 * f64::consts::PI);
 
         (rx.to_degrees(), ry.to_degrees(), rz.to_degrees())
     }
