@@ -918,7 +918,7 @@ fn main() {
 
     let mut gdl90 = Gdl90::new().unwrap();
 
-    let mut xplane_opt: Option<XPlane> = None; //Some(XPlane::new("127.0.0.1", 30).unwrap());
+    let mut xplane_opt: Option<XPlane> = Some(XPlane::new("127.0.0.1", 30).unwrap());
 
     let (center_lat, center_lon, center_res): (f64, f64, bool) = if let Some(ref mut xplane) = xplane_opt {
         loop {

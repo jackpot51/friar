@@ -2,6 +2,7 @@ use reqwest;
 use std::io::{self, Cursor, Read};
 use zip;
 
+use {reqwest_err, zip_err};
 use hgt::{HgtFile, HgtResolution};
 
 static SRTM_URL: &'static str = "https://dds.cr.usgs.gov/srtm/version2_1";
@@ -48,23 +49,6 @@ impl HgtSrtm {
         let (root, dirs): (&str, &[&str]) = match resolution {
             HgtResolution::One => ("SRTM1", &SRTM1_DIRS),
             HgtResolution::Three => ("SRTM3", &SRTM3_DIRS),
-        };
-
-        let reqwest_err = |err| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                err
-            )
-        };
-
-        let zip_err = |err| {
-            match err {
-                zip::result::ZipError::Io(io_err) => io_err,
-                _ => io::Error::new(
-                    io::ErrorKind::Other,
-                    err
-                )
-            }
         };
 
         for dir in dirs.iter() {
