@@ -11,6 +11,7 @@ use friar::coordinate::Coordinate;
 use friar::earth::Earth;
 use friar::gdl90::{Gdl90, Gdl90Kind};
 use friar::hgt::{HgtCache, HgtFile, HgtResolution};
+use friar::ourairports;
 use friar::position::Position;
 use friar::reference::Reference;
 use friar::spheroid::Spheroid;
@@ -585,6 +586,105 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
     triangles
 }
 
+struct RunwayEnd<'r, R: Spheroid> {
+    airport_ident: String,
+    ident: String,
+    coord: Coordinate<'r, R>,
+    length: f64,
+    width: f64,
+    heading: f64
+}
+
+fn oap_runway_ends<'r, R: Spheroid>(reference: &'r R) -> Vec<RunwayEnd<'r, R>> {
+    let mut runway_ends = Vec::new();
+
+    for runway in &ourairports::Runway::all().unwrap() {
+        let le = || -> Option<RunwayEnd<R>> {
+            Some(RunwayEnd {
+                airport_ident: runway.airport_ident.clone(),
+                ident: runway.le_ident.clone(),
+                coord: Coordinate::new(
+                    reference,
+                    runway.le_latitude_deg?,
+                    runway.le_longitude_deg?,
+                    runway.le_elevation_ft? * 0.3048 + 20.0
+                ),
+                length: runway.length_ft? * 0.3048,
+                width: runway.width_ft? * 0.3048,
+                heading: runway.le_heading_deg?
+            })
+        };
+
+        let he = || -> Option<RunwayEnd<R>> {
+            Some(RunwayEnd {
+                airport_ident: runway.airport_ident.clone(),
+                ident: runway.he_ident.clone(),
+                coord: Coordinate::new(
+                    reference,
+                    runway.he_latitude_deg?,
+                    runway.he_longitude_deg?,
+                    runway.he_elevation_ft? * 0.3048 + 20.0
+                ),
+                length: runway.length_ft? * 0.3048,
+                width: runway.width_ft? * 0.3048,
+                heading: runway.he_heading_deg?
+            })
+        };
+
+        if let Some(e) = le() {
+            runway_ends.push(e);
+        }
+
+        if let Some(e) = he() {
+            runway_ends.push(e);
+        }
+    }
+
+    runway_ends
+}
+
+fn oap_runway_end_triangles<'r, R: Spheroid>(runway_ends: &[RunwayEnd<'r, R>], bounds: (f64, f64, f64, f64), triangles: &mut Vec<(Position<'r, R>, Position<'r, R>, Position<'r, R>, (f32, f32, f32), (u8, u8, u8))>) {
+    let check_bounds = |coordinate: &Coordinate<'r, R>| -> bool {
+        coordinate.latitude > bounds.0 &&
+        coordinate.latitude < bounds.2 &&
+        coordinate.longitude > bounds.1 &&
+        coordinate.longitude < bounds.3
+    };
+
+    for e in runway_ends {
+        if ! check_bounds(&e.coord) {
+            continue;
+        }
+
+        let mut length = 0.0;
+        let block = e.width/2.0;
+        while length < e.length {
+            let coord = e.coord.offset(length, e.heading, 0.0);
+            length += block;
+
+            let a = coord.offset(block, e.heading - 90.0, 0.0);
+            let b = coord.offset(block, e.heading + 90.0, 0.0);
+            let c = a.offset(block, e.heading, 0.0);
+            let d = b.offset(block, e.heading, 0.0);
+
+            triangles.push((
+                a.position(),
+                b.position(),
+                c.position(),
+                (1.0, 1.0, 1.0),
+                (0xAA, 0xAA, 0xAA),
+            ));
+
+            triangles.push((
+                b.position(),
+                c.position(),
+                d.position(),
+                (1.0, 1.0, 1.0),
+                (0xAA, 0xAA, 0xAA),
+            ));
+        }
+    }
+}
 
 fn hgt_intersect<'r, R: Spheroid>(file: &HgtFile, reference: &'r R, origin: &Coordinate<'r, R>, heading: f64, pitch: f64) -> Option<Coordinate<'r, R>> {
     let mut a = origin.duplicate();
@@ -918,7 +1018,7 @@ fn main() {
 
     let mut gdl90 = Gdl90::new().unwrap();
 
-    let mut xplane_opt: Option<XPlane> = Some(XPlane::new("127.0.0.1", 30).unwrap());
+    let mut xplane_opt: Option<XPlane> = None; //Some(XPlane::new("127.0.0.1", 30).unwrap());
 
     let (center_lat, center_lon, center_res): (f64, f64, bool) = if let Some(ref mut xplane) = xplane_opt {
         loop {
@@ -973,7 +1073,7 @@ fn main() {
     let original_fov = 90.0f64;
     let origin = center.offset(-2000.0, orientation.0, orientation.1);
 
-    let osm_horizon = 1000.0;
+    let osm_horizon = 4000.0;
     let osm_sw = center.offset(osm_horizon, 225.0, 0.0);
     let osm_ne = center.offset(osm_horizon, 45.0, 0.0);
 
@@ -982,6 +1082,9 @@ fn main() {
     println!("Orientation: {:?}", orientation);
     println!("FOV: {}", original_fov);
     println!("OSM: {},{},{},{}", osm_sw.longitude, osm_sw.latitude, osm_ne.longitude, osm_ne.latitude);
+
+
+    let runway_ends = oap_runway_ends(&earth);
 
     let mut hgt_triangles = Vec::new();
     let mut osm_triangles = Vec::new();
@@ -995,6 +1098,7 @@ fn main() {
         ),
         ground
     );*/
+    let mut oap_triangles = Vec::new();
 
     let mut traffic_ownship_alt = None;
     let mut traffics = HashMap::new();
@@ -1044,7 +1148,7 @@ fn main() {
     let mut fill = true;
     let mut hud = true;
     let mut z_buffer = vec![0.0; (w.width() * w.height()) as usize];
-    let mut triangles = Vec::with_capacity(hgt_triangles.len() + osm_triangles.len() + intersect_triangles.len());
+    let mut triangles = Vec::with_capacity(hgt_triangles.len() + osm_triangles.len() + oap_triangles.len() + traffic_triangles.len() + intersect_triangles.len());
 
     let mut last_instant = Instant::now();
     loop {
@@ -1574,6 +1678,18 @@ fn main() {
                 hgt_file.triangles(bounds, &mut hgt_triangles);
             }
 
+            oap_triangles.clear();
+            oap_runway_end_triangles(
+                &runway_ends,
+                (
+                    viewer_sw.latitude,
+                    viewer_sw.longitude,
+                    viewer_ne.latitude,
+                    viewer_ne.longitude
+                ),
+                &mut oap_triangles
+            );
+
             redraw = true;
 
             drop(timer);
@@ -1672,6 +1788,7 @@ fn main() {
                 triangles.par_extend(
                     hgt_triangles.par_iter()
                         .chain(osm_triangles.par_iter())
+                        .chain(oap_triangles.par_iter())
                         .chain(traffic_triangles.par_iter())
                         .chain(intersect_triangles.par_iter())
                         .filter_map(triangle_map)
@@ -1904,6 +2021,76 @@ fn main() {
                 w.line(center.0 - 5, center.1, center.0 + 5, center.1, hud_color);
                 w.line(center.0, center.1 - 5, center.0, center.1 + 5, hud_color);
 
+                for runway in &runway_ends {
+                    let runway_pos = runway.coord.position();
+                    let runway_dist = viewer_pos.vector(&runway_pos).norm();
+
+                    if runway_dist < 16000.0 {
+                        let runway_ground = ground_perspective.transform(&runway_pos);
+                        let runway_screen = screen.transform(&runway_ground);
+
+                        if runway_screen.0 > 0.0 && runway_screen.0 < screen.x &&
+                            runway_screen.1 > 0.0 && runway_screen.1 < screen.y &&
+                            runway_screen.2 > 0.01
+                        {
+                            let x = runway_screen.0.round() as i32;
+                            let y = runway_screen.1.round() as i32;
+                            w.circle(x, y, 20, hud_color);
+
+                            {
+                                let end = runway.coord.offset(runway.length, runway.heading, 0.0);
+                                let end_pos = end.position();
+                                let end_ground = ground_perspective.transform(&end_pos);
+                                let end_screen = screen.transform(&end_ground);
+
+                                if end_screen.0 > 0.0 && end_screen.0 < screen.x &&
+                                    end_screen.1 > 0.0 && end_screen.1 < screen.y &&
+                                    end_screen.2 > 0.01
+                                {
+                                    let xe = end_screen.0.round() as i32;
+                                    let ye = end_screen.1.round() as i32;
+                                    w.line(x, y, xe, ye, hud_color);
+                                }
+                            }
+
+                            {
+                                hud_string.clear();
+                                let _ = write!(
+                                    hud_string,
+                                    "{} {}",
+                                    runway.airport_ident,
+                                    runway.ident
+                                );
+
+                                let text = hud_cache.render(&hud_string);
+                                text.draw(
+                                    &mut w,
+                                    x - (text.width() as i32)/2,
+                                    y - (text.height() as i32) - 20,
+                                    hud_color
+                                );
+                            }
+
+                            {
+                                hud_string.clear();
+                                let _ = write!(
+                                    hud_string,
+                                    "{}m",
+                                    runway_dist.round() as u32
+                                );
+
+                                let text = hud_cache.render(&hud_string);
+                                text.draw(
+                                    &mut w,
+                                    x - (text.width() as i32)/2,
+                                    y + 20,
+                                    hud_color
+                                );
+                            }
+                        }
+                    }
+                }
+
                 for (id, (traffic, alt_override)) in &traffics {
                     let alt = if let Some(some) = alt_override {
                         *some
@@ -2036,6 +2223,13 @@ fn main() {
                     WindowWriter::new(&mut w, 0, y, hud_color),
                     "Triangles (Osm): {}",
                     osm_triangles.len()
+                );
+                y += 16;
+
+                let _ = write!(
+                    WindowWriter::new(&mut w, 0, y, hud_color),
+                    "Triangles (Oap): {}",
+                    oap_triangles.len()
                 );
                 y += 16;
 
