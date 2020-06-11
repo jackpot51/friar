@@ -1035,6 +1035,31 @@ fn main() {
 
     hgt_nearby_files(&hgt_cache, center_lat, center_lon, hgt_res, &earth, ground_color, ocean_color, &hgt_files);
 
+    while hgt_files.get(&(center_lat.floor() as i8, center_lon.floor() as i8)).is_none() {
+        let mut found_event = true;
+        while found_event {
+            found_event = false;
+            for event in w.events() {
+                found_event = true;
+                match event.to_option() {
+                    EventOption::Quit(_quit_event) => return,
+                    _ => ()
+                }
+            }
+        }
+        w.set(Color::rgb(0, 0, 0));
+        let _ = write!(
+            WindowWriter::new(
+                &mut w,
+                0, 0,
+                hud_color
+            ),
+            "Loading"
+        );
+        w.sync();
+        thread::sleep(Duration::from_millis(10));
+    }
+
     let ground = if let Some(hgt_file) = hgt_files.get(&(center_lat.floor() as i8, center_lon.floor() as i8)) {
         if let Some((row, col)) = hgt_file.file.position(center_lat, center_lon) {
             hgt_file.file.get(row, col).unwrap_or(0) as f64
