@@ -3,7 +3,6 @@
 extern crate friar;
 extern crate orbclient;
 extern crate orbfont;
-extern crate osmpbfreader;
 extern crate polygon2;
 extern crate rayon;
 
@@ -11,6 +10,7 @@ use friar::coordinate::Coordinate;
 use friar::earth::Earth;
 use friar::gdl90::{Gdl90, Gdl90Kind};
 use friar::hgt::{HgtCache, HgtFile, HgtResolution};
+use friar::osm::Osm;
 use friar::ourairports;
 use friar::position::Position;
 use friar::reference::Reference;
@@ -18,12 +18,10 @@ use friar::spheroid::Spheroid;
 use friar::x_plane::XPlane;
 use orbclient::{Color, EventOption, Renderer, Window, WindowFlag};
 use orbfont::{Font, Text};
-use osmpbfreader::{OsmPbfReader, OsmObj, Node, NodeId, Way, WayId};
 use rayon::prelude::*;
 use std::{cmp, mem, thread};
 use std::collections::HashMap;
 use std::fmt::{self, Write};
-use std::fs::File;
 use std::time::{Duration, Instant};
 
 struct Timer {
@@ -359,22 +357,7 @@ impl<'a> FontCache<'a> {
     }
 }
 
-fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f64), ground: f64) -> Vec<(Position<'r, R>, Position<'r, R>, Position<'r, R>, (u8, u8, u8))> {
-    let mut nodes: HashMap<NodeId, Node> = HashMap::new();
-    let mut ways: HashMap<WayId, Way> = HashMap::new();
-
-    for obj_res in OsmPbfReader::new(File::open(file).unwrap()).iter() {
-        match obj_res.unwrap() {
-            OsmObj::Node(node) => {
-                nodes.insert(node.id, node);
-            },
-            OsmObj::Way(way) => {
-                ways.insert(way.id, way);
-            },
-            _ => ()
-        }
-    }
-
+fn osm_way_triangles<'r, R: Spheroid>(osm: &Osm, reference: &'r R, bounds: (f64, f64, f64, f64), ground: f64, triangles: &mut Vec<(Position<'r, R>, Position<'r, R>, Position<'r, R>, (f32, f32, f32), (u8, u8, u8))>) {
     let check_bounds = |coordinate: &Coordinate<'r, R>| -> bool {
         coordinate.latitude > bounds.0 &&
         coordinate.latitude < bounds.2 &&
@@ -448,15 +431,14 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
         })
     };
 
-    let mut triangles = Vec::with_capacity(ways.len());
-    for (_id, way) in ways.iter() {
+    for (_id, way) in osm.ways.iter() {
         // println!("{:?}", way);
 
         let mut in_bounds = false;
         let mut coords = Vec::with_capacity(way.nodes.len());
 
         for node_id in way.nodes.iter() {
-            let node = &nodes[node_id];
+            let node = &osm.nodes[node_id];
             // println!("  {:?}", node);
 
             let coord = reference.coordinate(node.lat(), node.lon(), ground);
@@ -527,6 +509,7 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
                 last_coord_max.position(),
                 last_coord_min.position(),
                 coord_min.position(),
+                (1.0, 1.0, 1.0),
                 rgb
             ));
 
@@ -534,6 +517,7 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
                 coord_max.position(),
                 coord_min.position(),
                 last_coord_max.position(),
+                (1.0, 1.0, 1.0),
                 rgb
             ));
         }
@@ -575,6 +559,7 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
                             a.position(),
                             b.position(),
                             c.position(),
+                            (1.0, 1.0, 1.0),
                             roof_rgb,
                         ))
                     }
@@ -582,8 +567,6 @@ fn osm<'r, R: Spheroid>(file: &str, reference: &'r R, bounds: (f64, f64, f64, f6
             }
         }
     }
-
-    triangles
 }
 
 struct RunwayEnd<'r, R: Spheroid> {
@@ -595,8 +578,8 @@ struct RunwayEnd<'r, R: Spheroid> {
     heading: f64
 }
 
-fn oap_runway_ends<'r, R: Spheroid>(reference: &'r R) -> Vec<RunwayEnd<'r, R>> {
-    let mut runway_ends = Vec::new();
+fn oap_runways<'r, R: Spheroid>(reference: &'r R) -> Vec<RunwayEnd<'r, R>> {
+    let mut runways = Vec::new();
 
     for runway in &ourairports::Runway::all().unwrap() {
         let le = || -> Option<RunwayEnd<R>> {
@@ -632,18 +615,18 @@ fn oap_runway_ends<'r, R: Spheroid>(reference: &'r R) -> Vec<RunwayEnd<'r, R>> {
         };
 
         if let Some(e) = le() {
-            runway_ends.push(e);
+            runways.push(e);
         }
 
         if let Some(e) = he() {
-            runway_ends.push(e);
+            runways.push(e);
         }
     }
 
-    runway_ends
+    runways
 }
 
-fn oap_runway_end_triangles<'r, R: Spheroid>(runway_ends: &[RunwayEnd<'r, R>], bounds: (f64, f64, f64, f64), triangles: &mut Vec<(Position<'r, R>, Position<'r, R>, Position<'r, R>, (f32, f32, f32), (u8, u8, u8))>) {
+fn oap_runway_triangles<'r, R: Spheroid>(runways: &[RunwayEnd<'r, R>], bounds: (f64, f64, f64, f64), triangles: &mut Vec<(Position<'r, R>, Position<'r, R>, Position<'r, R>, (f32, f32, f32), (u8, u8, u8))>) {
     let check_bounds = |coordinate: &Coordinate<'r, R>| -> bool {
         coordinate.latitude > bounds.0 &&
         coordinate.latitude < bounds.2 &&
@@ -651,7 +634,7 @@ fn oap_runway_end_triangles<'r, R: Spheroid>(runway_ends: &[RunwayEnd<'r, R>], b
         coordinate.longitude < bounds.3
     };
 
-    for e in runway_ends {
+    for e in runways {
         if ! check_bounds(&e.coord) {
             continue;
         }
@@ -1083,21 +1066,28 @@ fn main() {
     println!("FOV: {}", original_fov);
     println!("OSM: {},{},{},{}", osm_sw.longitude, osm_sw.latitude, osm_ne.longitude, osm_ne.latitude);
 
+    let runways = oap_runways(&earth);
 
-    let runway_ends = oap_runway_ends(&earth);
+    println!("Runways: {}", runways.len());
+
+    let osm_file_opt: Option<&'static str> = {
+        None
+        //Some("res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf")
+        //Some("cache/OSM/Denver.osm.pbf")
+    };
+    let mut osm_opt = osm_file_opt.and_then(|osm_file| match Osm::new(&osm_file) {
+        Ok(osm) => {
+            println!("Nodes: {}, Ways: {}", osm.nodes.len(), osm.ways.len());
+            Some(osm)
+        },
+        Err(err) => {
+            println!("Failed to read {}: {}", osm_file, err);
+            None
+        }
+    });
 
     let mut hgt_triangles = Vec::new();
     let mut osm_triangles = Vec::new();
-    /*osm(
-        //"cache/OSM/Denver.osm.pbf",
-        "res/planet_-104.99279,39.73659_-104.98198,39.74187.osm.pbf",
-        &earth,
-        (
-            osm_sw.latitude, osm_sw.longitude,
-            osm_ne.latitude, osm_ne.longitude,
-        ),
-        ground
-    );*/
     let mut oap_triangles = Vec::new();
 
     let mut traffic_ownship_alt = None;
@@ -1656,6 +1646,13 @@ fn main() {
             let viewer_sw = viewer.offset(hgt_horizon, 225.0, 0.0);
             let viewer_ne = viewer.offset(hgt_horizon, 45.0, 0.0);
 
+            let bounds = (
+                viewer_sw.latitude,
+                viewer_sw.longitude,
+                viewer_ne.latitude,
+                viewer_ne.longitude
+            );
+
             let reload_hgt_files = if let Some(hgt_file) = hgt_files.get(0) {
                 hgt_file.file.position(viewer.latitude, viewer.longitude).is_none()
             } else {
@@ -1668,27 +1665,16 @@ fn main() {
 
             hgt_triangles.clear();
             for hgt_file in hgt_files.iter() {
-                let bounds = (
-                    viewer_sw.latitude,
-                    viewer_sw.longitude,
-                    viewer_ne.latitude,
-                    viewer_ne.longitude
-                );
-
                 hgt_file.triangles(bounds, &mut hgt_triangles);
             }
 
+            if let Some(ref osm) = osm_opt.take() { //TODO: Improve performance
+                osm_triangles.clear();
+                osm_way_triangles(osm, &earth, bounds, ground, &mut osm_triangles)
+            }
+
             oap_triangles.clear();
-            oap_runway_end_triangles(
-                &runway_ends,
-                (
-                    viewer_sw.latitude,
-                    viewer_sw.longitude,
-                    viewer_ne.latitude,
-                    viewer_ne.longitude
-                ),
-                &mut oap_triangles
-            );
+            oap_runway_triangles(&runways, bounds, &mut oap_triangles);
 
             redraw = true;
 
@@ -2021,7 +2007,7 @@ fn main() {
                 w.line(center.0 - 5, center.1, center.0 + 5, center.1, hud_color);
                 w.line(center.0, center.1 - 5, center.0, center.1 + 5, hud_color);
 
-                for runway in &runway_ends {
+                for runway in &runways {
                     let runway_pos = runway.coord.position();
                     let runway_dist = viewer_pos.vector(&runway_pos).norm();
 

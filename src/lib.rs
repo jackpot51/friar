@@ -1,6 +1,7 @@
 #![feature(euclidean_division)]
 
 extern crate csv;
+extern crate osmpbfreader;
 extern crate plain;
 extern crate reqwest;
 extern crate serde;
@@ -14,6 +15,7 @@ pub mod coordinate;
 pub mod earth;
 pub mod gdl90;
 pub mod hgt;
+pub mod osm;
 pub mod ourairports;
 pub mod perspective;
 pub mod position;
