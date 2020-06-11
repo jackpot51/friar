@@ -1,11 +1,13 @@
 #![feature(euclidean_division)]
 
+extern crate dashmap;
 extern crate friar;
 extern crate orbclient;
 extern crate orbfont;
 extern crate polygon2;
 extern crate rayon;
 
+use dashmap::DashMap;
 use friar::coordinate::Coordinate;
 use friar::earth::Earth;
 use friar::gdl90::{Gdl90, Gdl90Kind};
@@ -22,6 +24,7 @@ use rayon::prelude::*;
 use std::{cmp, mem, thread};
 use std::collections::HashMap;
 use std::fmt::{self, Write};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 struct Timer {
@@ -931,46 +934,35 @@ impl<'r, R: Spheroid + Sync> HgtFileTiles<'r, R> {
     }
 }
 
-fn hgt_nearby_files<'r, R: Spheroid + Sync>(cache: &HgtCache, latitude: f64, longitude: f64, res: HgtResolution, reference: &'r R, ground_color: Color, ocean_color: Color) -> Box<[HgtFileTiles<'r, R>]> {
+fn hgt_nearby_files<R: Spheroid + Send + Sync>(cache: &Arc<HgtCache>, latitude: f64, longitude: f64, res: HgtResolution, reference: &'static R, ground_color: Color, ocean_color: Color, hgt_files: &Arc<DashMap<(i8, i8), HgtFileTiles<'static, R>>>) {
     let f = latitude.floor();
     let l = longitude.floor();
+    for &coord in &[
+        (f, l),
+        (f - 1.0, l),
+        (f, l - 1.0),
+        (f + 1.0, l),
+        (f, l + 1.0)
+    ] {
+        let index = (coord.0 as i8, coord.1 as i8);
+        if ! hgt_files.contains_key(&index) {
+            //TODO: prevent reloading
+            println!("loading {:?}", index);
 
-    let mut hgt_files_par = Vec::with_capacity(5);
-    hgt_files_par.par_extend(
-        [
-            (f, l, 0),
-            (f - 1.0, l, 1),
-            (f, l - 1.0, 2),
-            (f + 1.0, l, 3),
-            (f, l + 1.0, 4)
-        ].par_iter()
-        .map(|coord| {
-            (
-                HgtFileTiles::new(cache.get(coord.0, coord.1, res).unwrap(), reference, ground_color, ocean_color),
-                coord.2
-            )
-        })
-    );
-
-    hgt_files_par.par_sort_by(|a, b| {
-        a.1.cmp(&b.1)
-    });
-
-    let mut hgt_files = Vec::with_capacity(hgt_files_par.len());
-    for (hgt_file, _) in hgt_files_par {
-        hgt_files.push(hgt_file);
+            let cache = cache.clone();
+            let hgt_files = hgt_files.clone();
+            thread::spawn(move || {
+                let hgt_file = HgtFileTiles::new(
+                    cache.get(coord.0, coord.1, res).unwrap(),
+                    reference,
+                    ground_color,
+                    ocean_color
+                );
+                hgt_files.insert(index, hgt_file);
+                println!("loaded {:?}", index);
+            });
+        }
     }
-    hgt_files.into_boxed_slice()
-
-    /*
-    [
-        HgtFileTiles::new(cache.get(f, l, res).unwrap(), reference, ground_color, ocean_color),
-        HgtFileTiles::new(cache.get(f - 1.0, l, res).unwrap(), reference, ground_color, ocean_color),
-        HgtFileTiles::new(cache.get(f, l - 1.0, res).unwrap(), reference, ground_color, ocean_color),
-        HgtFileTiles::new(cache.get(f + 1.0, l, res).unwrap(), reference, ground_color, ocean_color),
-        HgtFileTiles::new(cache.get(f, l + 1.0, res).unwrap(), reference, ground_color, ocean_color),
-    ]
-    */
 }
 
 
@@ -997,7 +989,7 @@ fn main() {
 
     w.sync();
 
-    let earth = Earth;
+    static earth: Earth = Earth;
 
     let mut gdl90 = Gdl90::new().unwrap();
 
@@ -1037,11 +1029,13 @@ fn main() {
         (HgtResolution::Three, 16000.0)
     };
 
-    let hgt_cache = HgtCache::new("cache");
+    let hgt_cache = Arc::new(HgtCache::new("cache"));
 
-    let mut hgt_files = hgt_nearby_files(&hgt_cache, center_lat, center_lon, hgt_res, &earth, ground_color, ocean_color);
+    let hgt_files: Arc<DashMap<(i8, i8), HgtFileTiles<Earth>>> = Arc::new(DashMap::new());
 
-    let ground = if let Some(hgt_file) = hgt_files.get(0) {
+    hgt_nearby_files(&hgt_cache, center_lat, center_lon, hgt_res, &earth, ground_color, ocean_color, &hgt_files);
+
+    let ground = if let Some(hgt_file) = hgt_files.get(&(center_lat.floor() as i8, center_lon.floor() as i8)) {
         if let Some((row, col)) = hgt_file.file.position(center_lat, center_lon) {
             hgt_file.file.get(row, col).unwrap_or(0) as f64
         } else {
@@ -1549,7 +1543,7 @@ fn main() {
 
             reintersect = false;
 
-            intersect_opt = if let Some(hgt_file) = hgt_files.get(0) {
+            intersect_opt = if let Some(hgt_file) = hgt_files.get(&(viewer.latitude.floor() as i8, viewer.longitude.floor() as i8)) {
                 hgt_intersect(&hgt_file.file, &earth, &viewer, intersect_heading, intersect_pitch)
             } else {
                 None
@@ -1653,14 +1647,14 @@ fn main() {
                 viewer_ne.longitude
             );
 
-            let reload_hgt_files = if let Some(hgt_file) = hgt_files.get(0) {
+            let reload_hgt_files = if let Some(hgt_file) = hgt_files.get(&(viewer.latitude.floor() as i8, viewer.longitude.floor() as i8)) {
                 hgt_file.file.position(viewer.latitude, viewer.longitude).is_none()
             } else {
                 false
             };
 
             if reload_hgt_files {
-                hgt_files = hgt_nearby_files(&hgt_cache, viewer.latitude, viewer.longitude, hgt_res, &earth, ground_color, ocean_color);
+                hgt_nearby_files(&hgt_cache, viewer.latitude, viewer.longitude, hgt_res, &earth, ground_color, ocean_color, &hgt_files);
             }
 
             hgt_triangles.clear();
