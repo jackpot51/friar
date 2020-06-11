@@ -24,7 +24,7 @@ use rayon::prelude::*;
 use std::{cmp, mem, thread};
 use std::collections::HashMap;
 use std::fmt::{self, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 struct Timer {
@@ -115,6 +115,10 @@ impl Triangle {
 
     // Adapted from https://github.com/ssloy/tinyrenderer/wiki/Lesson-2:-Triangle-rasterization-and-back-face-culling
     fn fill<R: Renderer>(&self, r: &mut R, z_buffer: &mut [f32], color: Color) {
+        let w = r.width() as i32;
+        let h = r.height() as i32;
+        let data = r.data_mut();
+
         let a = self.a;
         let b = self.b;
         let c = self.c;
@@ -123,41 +127,51 @@ impl Triangle {
         //     return;
         // }
 
-        let w = r.width() as i32;
-        let h = r.height() as i32;
-
-        let data = r.data_mut();
-
         let y1 = cmp::max(a.y, 0);
         let y2 = cmp::min(c.y, h - 1);
         if y1 < y2 {
-            let total_height = c.y-a.y;
+            let aymcy = a.y - c.y;
+            let bymay = b.y - a.y;
+            let bymcy = b.y - c.y;
+            let cymay = c.y - a.y;
+            let cymby = c.y - b.y;
+            let axmcx = a.x - c.x;
+            let bxmax = b.x - a.x;
+            let cxmax = c.x - a.x;
+            let cxmbx = c.x - b.x;
+
             //TODO: Reduce operations in loop
             for y in y1..y2 + 1 {
                 let i = y - a.y;
 
-                let second_half = i>b.y-a.y || b.y==a.y;
-                let segment_height = if second_half { c.y-b.y } else { b.y-a.y };
+                let second_half = i>bymay || b.y==a.y;
+                let segment_height = if second_half { cymby } else { bymay };
 
-                let alpha = (i as f32)/(total_height as f32);
-                let beta  = ((i-(if second_half { b.y-a.y } else { 0 })) as f32)/(segment_height as f32); // be careful: with above conditions no division by zero here
+                let alpha = (i as f32)/(cymay as f32);
+                let beta  = ((i-(if second_half { bymay } else { 0 })) as f32)/(segment_height as f32); // be careful: with above conditions no division by zero here
 
-                let alphax = a.x + (((c.x-a.x) as f32)*alpha) as i32;
-                let betax = if second_half { b.x + (((c.x-b.x) as f32)*beta) as i32 } else { a.x + (((b.x-a.x) as f32)*beta) as i32 };
+                let alphax = a.x + ((cxmax as f32)*alpha) as i32;
+                let betax = if second_half { b.x + ((cxmbx as f32)*beta) as i32 } else { a.x + ((bxmax as f32)*beta) as i32 };
 
                 let (minx, maxx) = if alphax > betax { (betax, alphax) } else { (alphax, betax) };
                 let x1 = cmp::max(minx, 0);
                 let x2 = cmp::min(maxx, w - 1);
 
                 if x1 < x2 {
-                    for x in x1..x2 + 1 {
-                        let wa = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) as f32
-                            /
-                            ((b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y)) as f32;
+                    let ymcy = y - c.y;
 
-                        let wb = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) as f32
+                    let offset_y = (y * w) as usize;
+
+                    for x in x1..x2 + 1 {
+                        let xmcx = x - c.x;
+
+                        let wa = (bymcy * xmcx + cxmbx * ymcy) as f32
                             /
-                            ((b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y)) as f32;
+                            (bymcy * axmcx + cxmbx * aymcy) as f32;
+
+                        let wb = (cymay * xmcx + axmcx * ymcy) as f32
+                            /
+                            (bymcy * axmcx + cxmbx * aymcy) as f32;
 
                         let wc = 1.0 - wa - wb;
 
@@ -169,12 +183,10 @@ impl Triangle {
 
                         let z = weight(a.z, b.z, c.z);
 
-                        let offset = (y * w + x) as usize;
-                        if offset < z_buffer.len() && z_buffer[offset] < z {
-                            z_buffer[offset] = z;
-
+                        let offset = offset_y + x as usize;
+                        if z_buffer[offset] < z {
                             let intensity = weight(a.intensity, b.intensity, c.intensity);
-                            data[offset] = Color::rgb(
+                            let pixel = Color::rgb(
                                 // The following is to debug z-buffer
                                 // (z * 16384.0).min(255.0) as u8,
                                 // (z * 16384.0).min(255.0) as u8,
@@ -183,6 +195,99 @@ impl Triangle {
                                 (color.g() as f32 * intensity).min(255.0) as u8,
                                 (color.b() as f32 * intensity).min(255.0) as u8
                             );
+
+                            data[offset] = pixel;
+                            z_buffer[offset] = z;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn par_fill(&self, w: i32, h: i32, data_ptr: *mut Color, z_ptr: *mut f32, color: Color, row_mutexes: &[Mutex<()>]) {
+        let a = self.a;
+        let b = self.b;
+        let c = self.c;
+
+        // if a.y == b.y && a.y == c.y {
+        //     return;
+        // }
+
+        let y1 = cmp::max(a.y, 0);
+        let y2 = cmp::min(c.y, h - 1);
+        if y1 < y2 {
+            let aymcy = a.y - c.y;
+            let bymay = b.y - a.y;
+            let bymcy = b.y - c.y;
+            let cymay = c.y - a.y;
+            let cymby = c.y - b.y;
+            let axmcx = a.x - c.x;
+            let bxmax = b.x - a.x;
+            let cxmax = c.x - a.x;
+            let cxmbx = c.x - b.x;
+
+            //TODO: Reduce operations in loop
+            for y in y1..y2 + 1 {
+                let i = y - a.y;
+
+                let second_half = i>bymay || b.y==a.y;
+                let segment_height = if second_half { cymby } else { bymay };
+
+                let alpha = (i as f32)/(cymay as f32);
+                let beta  = ((i-(if second_half { bymay } else { 0 })) as f32)/(segment_height as f32); // be careful: with above conditions no division by zero here
+
+                let alphax = a.x + ((cxmax as f32)*alpha) as i32;
+                let betax = if second_half { b.x + ((cxmbx as f32)*beta) as i32 } else { a.x + ((bxmax as f32)*beta) as i32 };
+
+                let (minx, maxx) = if alphax > betax { (betax, alphax) } else { (alphax, betax) };
+                let x1 = cmp::max(minx, 0);
+                let x2 = cmp::min(maxx, w - 1);
+
+                if x1 < x2 {
+                    let ymcy = y - c.y;
+
+                    let offset_y = (y * w) as usize;
+                    let row_lock = row_mutexes[y as usize].lock();
+
+                    for x in x1..x2 + 1 {
+                        let xmcx = x - c.x;
+
+                        let wa = (bymcy * xmcx + cxmbx * ymcy) as f32
+                            /
+                            (bymcy * axmcx + cxmbx * aymcy) as f32;
+
+                        let wb = (cymay * xmcx + axmcx * ymcy) as f32
+                            /
+                            (bymcy * axmcx + cxmbx * aymcy) as f32;
+
+                        let wc = 1.0 - wa - wb;
+
+                        let weight = |va: f32, vb: f32, vc: f32| -> f32{
+                            (wa * va + wb * vb + wc * vc)
+                            /
+                            (wa + wb + wc)
+                        };
+
+                        let z = weight(a.z, b.z, c.z);
+
+                        let offset = offset_y + x as usize;
+                        if unsafe { *z_ptr.add(offset) < z } {
+                            let intensity = weight(a.intensity, b.intensity, c.intensity);
+                            let pixel = Color::rgb(
+                                // The following is to debug z-buffer
+                                // (z * 16384.0).min(255.0) as u8,
+                                // (z * 16384.0).min(255.0) as u8,
+                                // (z * 16384.0).min(255.0) as u8
+                                (color.r() as f32 * intensity).min(255.0) as u8,
+                                (color.g() as f32 * intensity).min(255.0) as u8,
+                                (color.b() as f32 * intensity).min(255.0) as u8
+                            );
+
+                            unsafe {
+                                *data_ptr.add(offset) = pixel;
+                                *z_ptr.add(offset) = z;
+                            }
                         }
                     }
                 }
@@ -1157,6 +1262,10 @@ fn main() {
     let mut fill = true;
     let mut hud = true;
     let mut z_buffer = vec![0.0; (w.width() * w.height()) as usize];
+    let mut row_mutexes = Vec::with_capacity(w.height() as usize);
+    for _ in 0..w.height() {
+        row_mutexes.push(Mutex::new(()));
+    }
     let mut triangles = Vec::with_capacity(hgt_triangles.len() + osm_triangles.len() + oap_triangles.len() + traffic_triangles.len() + intersect_triangles.len());
 
     let mut last_instant = Instant::now();
@@ -1270,6 +1379,10 @@ fn main() {
                     EventOption::Resize(resize_event) => {
                         w.sync_path();
                         z_buffer = vec![0.0; (resize_event.width * resize_event.height) as usize];
+                        let mut row_mutexes = Vec::with_capacity(resize_event.height as usize);
+                        for _ in 0..resize_event.height {
+                            row_mutexes.push(Mutex::new(()));
+                        }
                         redraw = true;
                     },
                     EventOption::Quit(_quit_event) => return,
@@ -1881,10 +1994,30 @@ fn main() {
             {
                 let timer = Timer::new("fill", debug);
 
-                for (triangle, color) in triangles.iter() {
-                    if fill {
-                        triangle.fill(&mut w, &mut z_buffer, *color);
+                if fill {
+                    if true {
+                        let data_addr = w.data_mut().as_mut_ptr() as usize;
+                        let z_buffer_addr = z_buffer.as_mut_ptr() as usize;
+                        triangles.par_iter().for_each(|(triangle, color)| {
+                            triangle.par_fill(
+                                w_w, w_h,
+                                data_addr as *mut Color,
+                                z_buffer_addr as *mut f32,
+                                *color,
+                                &row_mutexes,
+                            );
+                        });
                     } else {
+                        for (triangle, color) in triangles.iter() {
+                            triangle.fill(
+                                &mut w,
+                                &mut z_buffer,
+                                *color,
+                            );
+                        }
+                    }
+                } else {
+                    for (triangle, color) in triangles.iter() {
                         triangle.draw(&mut w, *color);
                     }
                 }
