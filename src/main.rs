@@ -1131,7 +1131,7 @@ fn main() {
     let (hgt_res, hgt_horizon) = if center_res {
         (HgtResolution::One, 8000.0)
     } else {
-        (HgtResolution::Three, 16000.0)
+        (HgtResolution::Three, 24000.0)
     };
 
     let hgt_cache = Arc::new(HgtCache::new("cache"));
