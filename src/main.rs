@@ -1,5 +1,3 @@
-#![feature(euclidean_division)]
-
 extern crate dashmap;
 extern crate friar;
 extern crate orbclient;
@@ -248,7 +246,7 @@ impl Triangle {
                     let ymcy = y - c.y;
 
                     let offset_y = (y * w) as usize;
-                    let row_lock = row_mutexes[y as usize].lock();
+                    let _row_lock = row_mutexes[y as usize].lock();
 
                     for x in x1..x2 + 1 {
                         let xmcx = x - c.x;
@@ -1788,7 +1786,7 @@ fn main() {
             if hgt_files.get(&(viewer.latitude.floor() as i16, viewer.longitude.floor() as i16)).is_none() {
                 hgt_nearby_files(&hgt_cache, viewer.latitude, viewer.longitude, hgt_res, &earth, ground_color, ocean_color, &hgt_files);
 
-                while hgt_files.get(&(center_lat.floor() as i16, center_lon.floor() as i16)).is_none() {
+                while hgt_files.get(&(viewer.latitude.floor() as i16, viewer.longitude.floor() as i16)).is_none() {
                     let mut found_event = true;
                     while found_event {
                         found_event = false;
