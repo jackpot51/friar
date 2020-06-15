@@ -1835,11 +1835,16 @@ fn main() {
             let w_h = w.height() as i32;
             let screen = viewport.screen(w_w as f64, w_h as f64, roll);
 
+            let clip = (
+                -0.1 * screen.x, 1.1 * screen.x,
+                -0.1 * screen.y, 1.1 * screen.y,
+                0.01
+            );
             let triangle_map = |triangle: &(Position<Earth>, Position<Earth>, Position<Earth>, (f32, f32, f32), (u8, u8, u8))| -> Option<(Triangle, Color)> {
                 let valid = |point: &(f64, f64, f64)| {
-                    point.0 > 0.0 && point.0 < screen.x &&
-                    point.1 > 0.0 && point.1 < screen.y &&
-                    point.2 > 0.01
+                    point.0 > clip.0 && point.0 < clip.1 &&
+                    point.1 > clip.2 && point.1 < clip.3 &&
+                    point.2 > clip.4
                 };
 
                 let a_earth = &triangle.0;
