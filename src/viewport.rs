@@ -5,10 +5,10 @@ use screen::Screen;
 
 //TODO: Turn into trait
 pub struct Viewport<'r, R: Reference + 'r> {
-    pub perspective: &'r Perspective<'r, R>,
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
+    perspective: &'r Perspective<'r, R>,
+    x: f64,
+    y: f64,
+    z: f64,
 }
 
 impl<'r, R: Reference> Viewport<'r, R> {

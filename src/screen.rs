@@ -4,20 +4,39 @@ use viewport::Viewport;
 
 //TODO: Turn into trait
 pub struct Screen<'r, R: Reference + 'r> {
-    pub viewport: &'r Viewport<'r, R>,
-    pub x: f64,
-    pub y: f64,
-    pub theta: f64,
+    viewport: &'r Viewport<'r, R>,
+    pub x: f64, //TODO: make private, due to cached calculations
+    pub y: f64, //TODO: make private, due to cached calculations
+    theta: f64,
+    // Cached calculations
+    ct: f64,
+    st: f64,
+    a: f64,
+    ax: f64,
+    ay: f64,
 }
 
 impl<'r, R: Reference> Screen<'r, R> {
     /// Create new Screen
     pub fn new(viewport: &'r Viewport<'r, R>, x: f64, y: f64, theta: f64) -> Self {
+        let radt = theta.to_radians();
+        let ct = radt.cos();
+        let st = radt.sin();
+
+        let a = x.max(y);
+        let ax = a/x;
+        let ay = a/y;
+
         Self {
             viewport,
             x,
             y,
             theta,
+            ct,
+            st,
+            a,
+            ax,
+            ay,
         }
     }
 
@@ -25,20 +44,12 @@ impl<'r, R: Reference> Screen<'r, R> {
     pub fn transform(&self, point: &Position<'r, R>) -> (f64, f64, f64) {
         let (bx, by, bz) = self.viewport.transform(point);
 
-        let t = self.theta.to_radians();
-        let ct = t.cos();
-        let st = t.sin();
+        let x = bx * self.ct - by * self.st;
+        let y = by * self.ct + bx * self.st;
 
-        let x = bx * ct - by * st;
-        let y = by * ct + bx * st;
-
-        let a = self.x.max(self.y);
-        let ax = a/self.x;
-        let ay = a/self.y;
-
-        let sx = (x * ax + 1.0)/2.0 * self.x;
-        let sy = (y * ay + 1.0)/2.0 * self.y;
-        let sz = bz * a;
+        let sx = (x * self.ax + 1.0)/2.0 * self.x;
+        let sy = (y * self.ay + 1.0)/2.0 * self.y;
+        let sz = bz * self.a;
 
         (sx, sy, sz)
     }

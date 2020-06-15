@@ -1836,31 +1836,26 @@ fn main() {
             let screen = viewport.screen(w_w as f64, w_h as f64, roll);
 
             let triangle_map = |triangle: &(Position<Earth>, Position<Earth>, Position<Earth>, (f32, f32, f32), (u8, u8, u8))| -> Option<(Triangle, Color)> {
+                let valid = |point: &(f64, f64, f64)| {
+                    point.0 > 0.0 && point.0 < screen.x &&
+                    point.1 > 0.0 && point.1 < screen.y &&
+                    point.2 > 0.01
+                };
+
                 let a_earth = &triangle.0;
                 let a_ground = ground_perspective.transform(a_earth);
                 let a_screen = screen.transform(&a_ground);
+                if ! valid(&a_screen) { return None; }
 
                 let b_earth = &triangle.1;
                 let b_ground = ground_perspective.transform(b_earth);
                 let b_screen = screen.transform(&b_ground);
+                if ! valid(&b_screen) { return None; }
 
                 let c_earth = &triangle.2;
                 let c_ground = ground_perspective.transform(c_earth);
                 let c_screen = screen.transform(&c_ground);
-
-                let min_z = 0.01;
-                if a_screen.2 < min_z || b_screen.2 < min_z || c_screen.2 < min_z {
-                    return None;
-                }
-
-                let valid = |point: &(f64, f64, f64)| {
-                    point.0 > 0.0 && point.0 < screen.x &&
-                    point.1 > 0.0 && point.1 < screen.y
-                };
-
-                if !valid(&a_screen) && !valid(&b_screen) && !valid(&c_screen) {
-                    return None;
-                }
+                if ! valid(&c_screen) { return None; }
 
                 let a_dist = viewer_pos.vector(&a_earth).norm() as f32;
                 let b_dist = viewer_pos.vector(&b_earth).norm() as f32;
