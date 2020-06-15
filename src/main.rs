@@ -1916,7 +1916,8 @@ fn main() {
                 z_buffer[i] = 0.0;
             }
 
-            {
+            let draw_horizon = false;
+            if draw_horizon {
                 let viewer_on_ground = earth.coordinate(viewer.latitude, viewer.longitude, 0.0);
 
                 let radius = viewer_on_ground.radius();
