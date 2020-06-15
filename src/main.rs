@@ -1039,7 +1039,7 @@ impl<'r, R: Spheroid + Sync> HgtFileTiles<'r, R> {
     }
 }
 
-fn hgt_nearby_files<R: Spheroid + Send + Sync>(cache: &Arc<HgtCache>, latitude: f64, longitude: f64, res: HgtResolution, reference: &'static R, ground_color: Color, ocean_color: Color, hgt_files: &Arc<DashMap<(i8, i8), HgtFileTiles<'static, R>>>) {
+fn hgt_nearby_files<R: Spheroid + Send + Sync>(cache: &Arc<HgtCache>, latitude: f64, longitude: f64, res: HgtResolution, reference: &'static R, ground_color: Color, ocean_color: Color, hgt_files: &Arc<DashMap<(i16, i16), HgtFileTiles<'static, R>>>) {
     let f = latitude.floor();
     let l = longitude.floor();
     for &coord in &[
@@ -1049,7 +1049,7 @@ fn hgt_nearby_files<R: Spheroid + Send + Sync>(cache: &Arc<HgtCache>, latitude: 
         (f + 1.0, l),
         (f, l + 1.0)
     ] {
-        let index = (coord.0 as i8, coord.1 as i8);
+        let index = (coord.0 as i16, coord.1 as i16);
         if ! hgt_files.contains_key(&index) {
             //TODO: prevent reloading
             println!("loading {:?}", index);
@@ -1136,11 +1136,11 @@ fn main() {
 
     let hgt_cache = Arc::new(HgtCache::new("cache"));
 
-    let hgt_files: Arc<DashMap<(i8, i8), HgtFileTiles<Earth>>> = Arc::new(DashMap::new());
+    let hgt_files: Arc<DashMap<(i16, i16), HgtFileTiles<Earth>>> = Arc::new(DashMap::new());
 
     hgt_nearby_files(&hgt_cache, center_lat, center_lon, hgt_res, &earth, ground_color, ocean_color, &hgt_files);
 
-    while hgt_files.get(&(center_lat.floor() as i8, center_lon.floor() as i8)).is_none() {
+    while hgt_files.get(&(center_lat.floor() as i16, center_lon.floor() as i16)).is_none() {
         let mut found_event = true;
         while found_event {
             found_event = false;
@@ -1165,7 +1165,7 @@ fn main() {
         thread::sleep(Duration::from_millis(10));
     }
 
-    let ground = if let Some(hgt_file) = hgt_files.get(&(center_lat.floor() as i8, center_lon.floor() as i8)) {
+    let ground = if let Some(hgt_file) = hgt_files.get(&(center_lat.floor() as i16, center_lon.floor() as i16)) {
         if let Some((row, col)) = hgt_file.file.position(center_lat, center_lon) {
             hgt_file.file.get(row, col).unwrap_or(0) as f64
         } else {
@@ -1681,7 +1681,7 @@ fn main() {
 
             reintersect = false;
 
-            intersect_opt = if let Some(hgt_file) = hgt_files.get(&(viewer.latitude.floor() as i8, viewer.longitude.floor() as i8)) {
+            intersect_opt = if let Some(hgt_file) = hgt_files.get(&(viewer.latitude.floor() as i16, viewer.longitude.floor() as i16)) {
                 hgt_intersect(&hgt_file.file, &earth, &viewer, intersect_heading, intersect_pitch)
             } else {
                 None
@@ -1785,14 +1785,33 @@ fn main() {
                 viewer_ne.longitude
             );
 
-            let reload_hgt_files = if let Some(hgt_file) = hgt_files.get(&(viewer.latitude.floor() as i8, viewer.longitude.floor() as i8)) {
-                hgt_file.file.position(viewer.latitude, viewer.longitude).is_none()
-            } else {
-                false
-            };
-
-            if reload_hgt_files {
+            if hgt_files.get(&(viewer.latitude.floor() as i16, viewer.longitude.floor() as i16)).is_none() {
                 hgt_nearby_files(&hgt_cache, viewer.latitude, viewer.longitude, hgt_res, &earth, ground_color, ocean_color, &hgt_files);
+
+                while hgt_files.get(&(center_lat.floor() as i16, center_lon.floor() as i16)).is_none() {
+                    let mut found_event = true;
+                    while found_event {
+                        found_event = false;
+                        for event in w.events() {
+                            found_event = true;
+                            match event.to_option() {
+                                EventOption::Quit(_quit_event) => return,
+                                _ => ()
+                            }
+                        }
+                    }
+                    w.set(Color::rgb(0, 0, 0));
+                    let _ = write!(
+                        WindowWriter::new(
+                            &mut w,
+                            0, 0,
+                            hud_color
+                        ),
+                        "Loading"
+                    );
+                    w.sync();
+                    thread::sleep(Duration::from_millis(10));
+                }
             }
 
             hgt_triangles.clear();
