@@ -6,8 +6,6 @@ authors = ["Jeremy Soller <jackpot51@gmail.com>"]
 [dependencies]
 csv = "1.0.5"
 dashmap = "3.11.4"
-gl = "*"
-glutin = { git = "https://gitlab.redox-os.org/redox-os/glutin.git", branch = "redox" }
 orbclient = "0.3.20"
 orbfont = "0.1.8"
 osmpbfreader = "0.12.0"
