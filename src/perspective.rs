@@ -67,7 +67,7 @@ impl<'r, R: Reference> Perspective<'r, R> {
         let sz_y_p_cz_x = sz_y + cz_x;
 
         // Name would otherwise be incomprehensible
-        let boom = (cy_z + self.sy * sz_y_p_cz_x);
+        let boom = cy_z + self.sy * sz_y_p_cz_x;
 
         let dx = self.cy * sz_y_p_cz_x - sy_z;
         let dy = self.sx * boom + self.cx * cz_y_m_sz_x;

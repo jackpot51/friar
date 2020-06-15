@@ -1,5 +1,3 @@
-#![feature(euclidean_division)]
-
 extern crate csv;
 extern crate osmpbfreader;
 extern crate plain;
