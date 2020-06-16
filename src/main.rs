@@ -1065,39 +1065,29 @@ impl<'r, R: Spheroid + Sync> HgtFileTiles<'r, R> {
 }
 
 fn hgt_nearby_files<R: Spheroid + Send + Sync>(cache: &Arc<HgtCache>, latitude: f64, longitude: f64, res: HgtResolution, reference: &'static R, ground_color: Color, ocean_color: Color, levels: usize, hgt_files: &Arc<DashMap<(i16, i16), HgtFileTiles<'static, R>>>) {
-    let f = latitude.floor();
-    let l = longitude.floor();
-    for &coord in &[
-        (f, l),
-        (f - 1.0, l),
-        (f, l - 1.0),
-        (f + 1.0, l),
-        (f, l + 1.0),
-        /* Diagonals
-        (f - 1.0, l - 1.0),
-        (f - 1.0, l + 1.0),
-        (f + 1.0, l - 1.0),
-        (f + 1.0, l + 1.0),
-        */
-    ] {
-        let index = (coord.0 as i16, coord.1 as i16);
-        if ! hgt_files.contains_key(&index) {
-            //TODO: prevent reloading
-            println!("loading {:?}", index);
+    let f_center = latitude.floor() as i16;
+    let l_center = longitude.floor() as i16;
+    for f in f_center - 1 ..= f_center + 1 {
+        for l in l_center - 1 ..= l_center + 1 {
+            let index = (f, l);
+            if ! hgt_files.contains_key(&index) {
+                //TODO: prevent reloading
+                println!("loading {:?}", index);
 
-            let cache = cache.clone();
-            let hgt_files = hgt_files.clone();
-            thread::spawn(move || {
-                let hgt_file = HgtFileTiles::new(
-                    cache.get(coord.0, coord.1, res).unwrap(),
-                    reference,
-                    ground_color,
-                    ocean_color,
-                    levels
-                );
-                hgt_files.insert(index, hgt_file);
-                println!("loaded {:?}", index);
-            });
+                let cache = cache.clone();
+                let hgt_files = hgt_files.clone();
+                thread::spawn(move || {
+                    let hgt_file = HgtFileTiles::new(
+                        cache.get(f as f64, l as f64, res).unwrap(),
+                        reference,
+                        ground_color,
+                        ocean_color,
+                        levels
+                    );
+                    hgt_files.insert(index, hgt_file);
+                    println!("loaded {:?}", index);
+                });
+            }
         }
     }
 }
