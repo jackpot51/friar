@@ -817,11 +817,11 @@ type HgtTile<'r, R> = (HgtTriangle<'r, R>, HgtTriangle<'r, R>);
 
 struct HgtFileTiles<'r, R: Spheroid + 'r> {
     file: HgtFile,
-    tiles: Box<[Box<[Option<HgtTile<'r, R>>]>]>
+    tiles_levels: Box<[Box<[Box<[Option<HgtTile<'r, R>>]>]>]>
 }
 
 impl<'r, R: Spheroid + Sync> HgtFileTiles<'r, R> {
-    fn new(file: HgtFile, reference: &'r R, ground_color: Color, ocean_color: Color) -> Self {
+    fn new(file: HgtFile, reference: &'r R, ground_color: Color, ocean_color: Color, levels: usize) -> Self {
         let samples = file.resolution.samples();
 
         let rgb = |low: f64, high: f64| -> (u8, u8, u8) {
@@ -879,12 +879,9 @@ impl<'r, R: Spheroid + Sync> HgtFileTiles<'r, R> {
             int/count
         };
 
-        let mut tiles = Vec::with_capacity(samples as usize);
-        {
-            let cell_map = |row: u16, col: u16| -> Option<HgtTile<'r, R>> {
-                let prev_row = row - 1;
-                let prev_col = col - 1;
-
+        let mut tiles_levels = Vec::with_capacity(levels);
+        for level in 0..levels {
+            let cell_map = |prev_row: u16, prev_col: u16, row: u16, col: u16| -> Option<HgtTile<'r, R>> {
                 let coord = |row, col| -> Option<Coordinate<'r, R>> {
                     let h = file.get(row, col)?;
                     let (lat, lon) = file.coordinate(row, col)?;
@@ -977,67 +974,97 @@ impl<'r, R: Spheroid + Sync> HgtFileTiles<'r, R> {
                 Some((abc, bcd))
             };
 
-            for row in 2..samples {
+            let level_factor = 2u16.pow(level as u32);
+            let mut tiles = Vec::with_capacity(samples as usize);
+            let mut row = 1 + level_factor;
+            while row < samples {
                 let mut tiles_row = Vec::with_capacity(samples as usize);
-                for col in 2..samples {
-                    tiles_row.push(cell_map(row, col));
+                let mut col = 1 + level_factor;
+                while col < samples {
+                    tiles_row.push(cell_map(row - level_factor, col - level_factor, row, col));
+                    col += level_factor;
                 }
                 tiles.push(tiles_row.into_boxed_slice());
+                row += level_factor;
             }
+            // println!("level {} factor {} tiles {}", level, level_factor, tiles.len());
+            tiles_levels.push(tiles.into_boxed_slice());
         }
 
         Self {
             file,
-            tiles: tiles.into_boxed_slice()
+            tiles_levels: tiles_levels.into_boxed_slice(),
         }
     }
 
-    fn triangles(&self, bounds: (f64, f64, f64, f64), triangles: &mut Vec<HgtTriangle<'r, R>>) {
+    fn triangles(&self, bounds_levels: &[(f64, f64, f64, f64)], triangles: &mut Vec<HgtTriangle<'r, R>>) {
         let samples = self.file.resolution.samples();
 
         let min = self.file.coordinate(1, 1).unwrap();
         let max = self.file.coordinate(samples - 1, samples - 1).unwrap();
 
-        let start = self.file.position(bounds.0.min(max.0).max(min.0), bounds.1.min(max.1).max(min.1)).unwrap();
-        let end = self.file.position(bounds.2.min(max.0).max(min.0), bounds.3.min(max.1).max(min.1)).unwrap();
+        let mut prev_opt: Option<(u16, u16, u16, u16)> = None;
+        for (level, bounds) in bounds_levels.iter().enumerate() {
+            if let Some(tiles) = self.tiles_levels.get(level) {
+                let level_factor = 2u16.pow(level as u32);
 
-        let start_row = cmp::max(1, start.0);
-        let start_col = cmp::max(1, start.1);
-        let end_row = cmp::min(samples - 1, end.0);
-        let end_col = cmp::min(samples - 1, end.1);
+                let start = self.file.position(bounds.0.min(max.0).max(min.0), bounds.1.min(max.1).max(min.1)).unwrap();
+                let end = self.file.position(bounds.2.min(max.0).max(min.0), bounds.3.min(max.1).max(min.1)).unwrap();
 
-        if end_row > start_row && end_col > start_col {
-            let mut push = |triangle: &HgtTriangle<'r, R>| {
-                triangles.push((
-                    triangle.0.duplicate(),
-                    triangle.1.duplicate(),
-                    triangle.2.duplicate(),
-                    triangle.3,
-                    triangle.4
-                ));
-            };
+                let start_row = cmp::max(1, start.0 / level_factor);
+                let start_col = cmp::max(1, start.1 / level_factor);
+                let end_row = cmp::min(tiles.len() as u16 - 1, end.0 / level_factor);
+                let end_col = cmp::min(tiles[0].len() as u16 - 1, end.1 / level_factor);
 
-            for row in start_row..end_row + 1 {
-                if let Some(tiles_row) = self.tiles.get(row as usize) {
-                    for col in start_col..end_col + 1 {
-                        if let Some(tile_opt) = tiles_row.get(col as usize) {
-                            if let Some(tile) = tile_opt {
-                                push(&tile.0);
-                                push(&tile.1);
+                if end_row > start_row && end_col > start_col {
+                    let mut push = |triangle: &HgtTriangle<'r, R>| {
+                        triangles.push((
+                            triangle.0.duplicate(),
+                            triangle.1.duplicate(),
+                            triangle.2.duplicate(),
+                            triangle.3,
+                            triangle.4
+                        ));
+                    };
+
+                    for row in start_row..end_row + 1 {
+                        if let Some(tiles_row) = tiles.get(row as usize) {
+                            for col in start_col..end_col + 1 {
+                                if let Some(prev) = prev_opt {
+                                    // Skip if area was previously handled
+                                    if row * level_factor > prev.0
+                                    && row * level_factor < prev.2
+                                    && col * level_factor > prev.1
+                                    && col * level_factor < prev.3
+                                    { continue; }
+                                }
+                                if let Some(tile_opt) = tiles_row.get(col as usize) {
+                                    if let Some(tile) = tile_opt {
+                                        push(&tile.0);
+                                        push(&tile.1);
+                                    }
+                                } else {
+                                    break;
+                                }
                             }
                         } else {
                             break;
                         }
                     }
-                } else {
-                    break;
                 }
+
+                prev_opt = Some((
+                    start_row * level_factor,
+                    start_col * level_factor,
+                    end_row * level_factor,
+                    end_col * level_factor
+                ));
             }
         }
     }
 }
 
-fn hgt_nearby_files<R: Spheroid + Send + Sync>(cache: &Arc<HgtCache>, latitude: f64, longitude: f64, res: HgtResolution, reference: &'static R, ground_color: Color, ocean_color: Color, hgt_files: &Arc<DashMap<(i16, i16), HgtFileTiles<'static, R>>>) {
+fn hgt_nearby_files<R: Spheroid + Send + Sync>(cache: &Arc<HgtCache>, latitude: f64, longitude: f64, res: HgtResolution, reference: &'static R, ground_color: Color, ocean_color: Color, levels: usize, hgt_files: &Arc<DashMap<(i16, i16), HgtFileTiles<'static, R>>>) {
     let f = latitude.floor();
     let l = longitude.floor();
     for &coord in &[
@@ -1045,7 +1072,13 @@ fn hgt_nearby_files<R: Spheroid + Send + Sync>(cache: &Arc<HgtCache>, latitude: 
         (f - 1.0, l),
         (f, l - 1.0),
         (f + 1.0, l),
-        (f, l + 1.0)
+        (f, l + 1.0),
+        /* Diagonals
+        (f - 1.0, l - 1.0),
+        (f - 1.0, l + 1.0),
+        (f + 1.0, l - 1.0),
+        (f + 1.0, l + 1.0),
+        */
     ] {
         let index = (coord.0 as i16, coord.1 as i16);
         if ! hgt_files.contains_key(&index) {
@@ -1059,7 +1092,8 @@ fn hgt_nearby_files<R: Spheroid + Send + Sync>(cache: &Arc<HgtCache>, latitude: 
                     cache.get(coord.0, coord.1, res).unwrap(),
                     reference,
                     ground_color,
-                    ocean_color
+                    ocean_color,
+                    levels
                 );
                 hgt_files.insert(index, hgt_file);
                 println!("loaded {:?}", index);
@@ -1126,17 +1160,17 @@ fn main() {
         )
     };
 
-    let (hgt_res, hgt_horizon) = if center_res {
-        (HgtResolution::One, 8000.0)
+    let (hgt_res, hgt_horizons) = if center_res {
+        (HgtResolution::One, [2_000.0, 8_000.0, 32_000.0])
     } else {
-        (HgtResolution::Three, 24000.0)
+        (HgtResolution::Three, [4_000.0, 16_000.0, 64_000.0])
     };
 
     let hgt_cache = Arc::new(HgtCache::new("cache"));
 
     let hgt_files: Arc<DashMap<(i16, i16), HgtFileTiles<Earth>>> = Arc::new(DashMap::new());
 
-    hgt_nearby_files(&hgt_cache, center_lat, center_lon, hgt_res, &earth, ground_color, ocean_color, &hgt_files);
+    hgt_nearby_files(&hgt_cache, center_lat, center_lon, hgt_res, &earth, ground_color, ocean_color, hgt_horizons.len(), &hgt_files);
 
     while hgt_files.get(&(center_lat.floor() as i16, center_lon.floor() as i16)).is_none() {
         let mut found_event = true;
@@ -1773,18 +1807,22 @@ fn main() {
 
             rehgt = false;
 
-            let viewer_sw = viewer.offset(hgt_horizon, 225.0, 0.0);
-            let viewer_ne = viewer.offset(hgt_horizon, 45.0, 0.0);
-
-            let bounds = (
-                viewer_sw.latitude,
-                viewer_sw.longitude,
-                viewer_ne.latitude,
-                viewer_ne.longitude
-            );
+            let mut bounds_levels = Vec::with_capacity(hgt_horizons.len());
+            for hgt_horizon in hgt_horizons.iter() {
+                let viewer_sw = viewer.offset(*hgt_horizon, 225.0, 0.0);
+                let viewer_ne = viewer.offset(*hgt_horizon, 45.0, 0.0);
+                let bounds = (
+                    viewer_sw.latitude,
+                    viewer_sw.longitude,
+                    viewer_ne.latitude,
+                    viewer_ne.longitude
+                );
+                // println!("bounds {}: {:?}", hgt_horizon, bounds);
+                bounds_levels.push(bounds);
+            }
 
             if hgt_files.get(&(viewer.latitude.floor() as i16, viewer.longitude.floor() as i16)).is_none() {
-                hgt_nearby_files(&hgt_cache, viewer.latitude, viewer.longitude, hgt_res, &earth, ground_color, ocean_color, &hgt_files);
+                hgt_nearby_files(&hgt_cache, viewer.latitude, viewer.longitude, hgt_res, &earth, ground_color, ocean_color, hgt_horizons.len(), &hgt_files);
 
                 while hgt_files.get(&(viewer.latitude.floor() as i16, viewer.longitude.floor() as i16)).is_none() {
                     let mut found_event = true;
@@ -1814,16 +1852,16 @@ fn main() {
 
             hgt_triangles.clear();
             for hgt_file in hgt_files.iter() {
-                hgt_file.triangles(bounds, &mut hgt_triangles);
+                hgt_file.triangles(&bounds_levels, &mut hgt_triangles);
             }
 
             if let Some(ref osm) = osm_opt.take() { //TODO: Improve performance
                 osm_triangles.clear();
-                osm_way_triangles(osm, &earth, bounds, ground, &mut osm_triangles)
+                osm_way_triangles(osm, &earth, bounds_levels[bounds_levels.len() - 1], ground, &mut osm_triangles)
             }
 
             oap_triangles.clear();
-            oap_runway_triangles(&runways, bounds, &mut oap_triangles);
+            oap_runway_triangles(&runways, bounds_levels[bounds_levels.len() - 1], &mut oap_triangles);
 
             redraw = true;
 
@@ -2181,7 +2219,7 @@ fn main() {
                     let runway_pos = runway.coord.position();
                     let runway_dist = viewer_pos.vector(&runway_pos).norm();
 
-                    if runway_dist < 16000.0 {
+                    if runway_dist < hgt_horizons[hgt_horizons.len() - 1] {
                         let runway_ground = ground_perspective.transform(&runway_pos);
                         let runway_screen = screen.transform(&runway_ground);
 
