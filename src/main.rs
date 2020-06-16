@@ -1893,29 +1893,29 @@ fn main() {
             let clip = (
                 -0.1 * screen.x, 1.1 * screen.x,
                 -0.1 * screen.y, 1.1 * screen.y,
-                0.01
+                0.0001
             );
+            let clip_valid = |point: &(f64, f64, f64)| {
+                point.0 > clip.0 && point.0 < clip.1 &&
+                point.1 > clip.2 && point.1 < clip.3 &&
+                point.2 > clip.4
+            };
             let triangle_map = |triangle: &(Position<Earth>, Position<Earth>, Position<Earth>, (f32, f32, f32), (u8, u8, u8))| -> Option<(Triangle, Color)> {
-                let valid = |point: &(f64, f64, f64)| {
-                    point.0 > clip.0 && point.0 < clip.1 &&
-                    point.1 > clip.2 && point.1 < clip.3 &&
-                    point.2 > clip.4
-                };
 
                 let a_earth = &triangle.0;
                 let a_ground = ground_perspective.transform(a_earth);
                 let a_screen = screen.transform(&a_ground);
-                if ! valid(&a_screen) { return None; }
+                if ! clip_valid(&a_screen) { return None; }
 
                 let b_earth = &triangle.1;
                 let b_ground = ground_perspective.transform(b_earth);
                 let b_screen = screen.transform(&b_ground);
-                if ! valid(&b_screen) { return None; }
+                if ! clip_valid(&b_screen) { return None; }
 
                 let c_earth = &triangle.2;
                 let c_ground = ground_perspective.transform(c_earth);
                 let c_screen = screen.transform(&c_ground);
-                if ! valid(&c_screen) { return None; }
+                if ! clip_valid(&c_screen) { return None; }
 
                 let a_dist = viewer_pos.vector(&a_earth).norm() as f32;
                 let b_dist = viewer_pos.vector(&b_earth).norm() as f32;
@@ -2091,10 +2091,7 @@ fn main() {
                     let h_ground = ground_perspective.transform(&h_earth);
                     let h_screen = screen.transform(&h_ground);
 
-                    if h_screen.0 > 0.0 && h_screen.0 < screen.x &&
-                        h_screen.1 > 0.0 && h_screen.1 < screen.y &&
-                        h_screen.2 > 0.01
-                    {
+                    if clip_valid(&h_screen) {
                         let size = 16.0;
 
                         let r = roll.to_radians();
@@ -2139,10 +2136,7 @@ fn main() {
                     let p_ground = ground_perspective.transform(&p_earth);
                     let p_screen = screen.transform(&p_ground);
 
-                    if p_screen.0 > 0.0 && p_screen.0 < screen.x &&
-                        p_screen.1 > 0.0 && p_screen.1 < screen.y &&
-                        p_screen.2 > 0.01
-                    {
+                    if clip_valid(&p_screen) {
                         let p_draw = if p <= 90 {
                             p
                         } else if p <= 270 {
@@ -2223,10 +2217,7 @@ fn main() {
                         let runway_ground = ground_perspective.transform(&runway_pos);
                         let runway_screen = screen.transform(&runway_ground);
 
-                        if runway_screen.0 > 0.0 && runway_screen.0 < screen.x &&
-                            runway_screen.1 > 0.0 && runway_screen.1 < screen.y &&
-                            runway_screen.2 > 0.01
-                        {
+                        if clip_valid(&runway_screen) {
                             let x = runway_screen.0.round() as i32;
                             let y = runway_screen.1.round() as i32;
                             w.circle(x, y, 20, hud_color);
@@ -2237,10 +2228,7 @@ fn main() {
                                 let end_ground = ground_perspective.transform(&end_pos);
                                 let end_screen = screen.transform(&end_ground);
 
-                                if end_screen.0 > 0.0 && end_screen.0 < screen.x &&
-                                    end_screen.1 > 0.0 && end_screen.1 < screen.y &&
-                                    end_screen.2 > 0.01
-                                {
+                                if clip_valid(&end_screen) {
                                     let xe = end_screen.0.round() as i32;
                                     let ye = end_screen.1.round() as i32;
                                     w.line(x, y, xe, ye, hud_color);
@@ -2301,10 +2289,7 @@ fn main() {
                     let traffic_ground = ground_perspective.transform(&traffic_pos);
                     let traffic_screen = screen.transform(&traffic_ground);
 
-                    if traffic_screen.0 > 0.0 && traffic_screen.0 < screen.x &&
-                        traffic_screen.1 > 0.0 && traffic_screen.1 < screen.y &&
-                        traffic_screen.2 > 0.01
-                    {
+                    if clip_valid(&traffic_screen) {
                         let x = traffic_screen.0.round() as i32;
                         let y = traffic_screen.1.round() as i32;
                         w.circle(x, y, 20, hud_color);
@@ -2345,10 +2330,7 @@ fn main() {
                     let intersect_ground = ground_perspective.transform(&intersect_pos);
                     let intersect_screen = screen.transform(&intersect_ground);
 
-                    if intersect_screen.0 > 0.0 && intersect_screen.0 < screen.x &&
-                        intersect_screen.1 > 0.0 && intersect_screen.1 < screen.y &&
-                        intersect_screen.2 > 0.01
-                    {
+                    if clip_valid(&intersect_screen) {
                         let x = intersect_screen.0.round() as i32;
                         let y = intersect_screen.1.round() as i32;
                         w.circle(x, y, 20, hud_color);
