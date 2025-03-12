@@ -1,10 +1,3 @@
-extern crate dashmap;
-extern crate friar;
-extern crate orbclient;
-extern crate orbfont;
-extern crate polygon2;
-extern crate rayon;
-
 use dashmap::DashMap;
 use friar::coordinate::Coordinate;
 use friar::earth::Earth;
@@ -471,7 +464,8 @@ fn osm_way_triangles<'r, R: Spheroid>(osm: &Osm, reference: &'r R, bounds: (f64,
         coordinate.longitude < bounds.3
     };
 
-    let parse_height = |s: &String| -> Option<f64> {
+    fn parse_height(s: impl AsRef<str>) -> Option<f64> {
+        let s = s.as_ref();
         Some(match s.replace("'", "").replace(" m", "").parse::<f64>() {
             Ok(height) => if s.ends_with("'") {
                 height * 3.28084
@@ -483,10 +477,11 @@ fn osm_way_triangles<'r, R: Spheroid>(osm: &Osm, reference: &'r R, bounds: (f64,
                 return None;
             }
         })
-    };
+    }
 
-    let parse_color = |s: &String| -> Option<u32> {
-        Some(match s.as_str() {
+    fn parse_color(s: impl AsRef<str>) -> Option<u32> {
+        let s = s.as_ref();
+        Some(match s {
             "black" => 0x404040, //0x000000,
             "white" => 0xFFFFFF,
             "gray" | "grey" => 0x808080,
@@ -525,9 +520,10 @@ fn osm_way_triangles<'r, R: Spheroid>(osm: &Osm, reference: &'r R, bounds: (f64,
                 }
             }
         })
-    };
+    }
 
-    let parse_levels = |s: &String| -> Option<f64> {
+    fn parse_levels(s: impl AsRef<str>) -> Option<f64> {
+        let s = s.as_ref();
         Some(match s.parse::<f64>() {
             Ok(levels) => levels * 3.0,
             Err(err) => {
@@ -535,7 +531,7 @@ fn osm_way_triangles<'r, R: Spheroid>(osm: &Osm, reference: &'r R, bounds: (f64,
                 return None;
             }
         })
-    };
+    }
 
     for (_id, way) in osm.ways.iter() {
         // println!("{:?}", way);
@@ -652,6 +648,7 @@ fn osm_way_triangles<'r, R: Spheroid>(osm: &Osm, reference: &'r R, bounds: (f64,
                         points.push([x, y]);
                     }
 
+                    /*TODO: replace polygon2
                     let indexes = polygon2::triangulate(&points);
                     if indexes.len() < points.len() {
                         // println!("{:?} => {:?}", points, indexes);
@@ -669,6 +666,7 @@ fn osm_way_triangles<'r, R: Spheroid>(osm: &Osm, reference: &'r R, bounds: (f64,
                             roof_rgb,
                         ))
                     }
+                    */
                 }
             }
         }

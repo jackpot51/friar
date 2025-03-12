@@ -1,5 +1,5 @@
-use position::Position;
-use vector::Vector;
+use crate::position::Position;
+use crate::vector::Vector;
 
 pub trait Reference: Sized {
     /// Create Position using this Reference

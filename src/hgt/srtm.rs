@@ -2,10 +2,11 @@ use reqwest;
 use std::io::{self, Cursor, Read};
 use zip;
 
-use {reqwest_err, zip_err};
-use hgt::{HgtFile, HgtResolution};
+use crate::{reqwest_err, zip_err};
+use crate::hgt::{HgtFile, HgtResolution};
 
-static SRTM_URL: &'static str = "https://dds.cr.usgs.gov/srtm/version2_1";
+//TODO: original source was removed? static SRTM_URL: &'static str = "https://dds.cr.usgs.gov/srtm/version2_1";
+static SRTM_URL: &'static str = "https://srtm.kurviger.de";
 
 static SRTM1_DIRS: [&'static str; 7] = [
     "Region_01",

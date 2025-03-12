@@ -1,7 +1,7 @@
 use std::{f64, fmt};
 
-use position::Position;
-use spheroid::Spheroid;
+use crate::position::Position;
+use crate::spheroid::Spheroid;
 
 pub struct Coordinate<'r, R: Spheroid + 'r> {
     pub reference: &'r R,

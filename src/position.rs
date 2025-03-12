@@ -1,10 +1,10 @@
 use std::{f64, fmt};
 
-use coordinate::Coordinate;
-use reference::Reference;
-use perspective::Perspective;
-use spheroid::Spheroid;
-use vector::Vector;
+use crate::coordinate::Coordinate;
+use crate::reference::Reference;
+use crate::perspective::Perspective;
+use crate::spheroid::Spheroid;
+use crate::vector::Vector;
 
 pub struct Position<'r, R: Reference + 'r> {
     pub reference: &'r R,

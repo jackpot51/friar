@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use hgt::{HgtFile, HgtResolution, HgtSrtm};
+use crate::hgt::{HgtFile, HgtResolution, HgtSrtm};
 
 pub struct HgtCache {
     path: PathBuf,

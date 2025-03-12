@@ -1,6 +1,6 @@
 use std::fmt;
 
-use reference::Reference;
+use crate::reference::Reference;
 
 pub struct Vector<'r, R: Reference + 'r> {
     pub reference: &'r R,

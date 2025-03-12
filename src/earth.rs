@@ -1,5 +1,5 @@
-use reference::Reference;
-use spheroid::Spheroid;
+use crate::reference::Reference;
+use crate::spheroid::Spheroid;
 
 pub struct Earth;
 

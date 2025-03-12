@@ -1,7 +1,7 @@
 use reqwest;
 use std::io;
 
-use reqwest_err;
+use crate::reqwest_err;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Airport {
@@ -28,7 +28,7 @@ pub struct Airport {
 
 impl Airport {
     pub fn all() -> io::Result<Vec<Self>> {
-        let response = reqwest::get("http://ourairports.com/data/airports.csv")
+        let response = reqwest::get("https://davidmegginson.github.io/ourairports-data/airports.csv")
             .map_err(reqwest_err)?;
 
         let mut entries = Vec::new();

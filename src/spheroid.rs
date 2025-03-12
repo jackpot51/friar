@@ -1,5 +1,5 @@
-use coordinate::Coordinate;
-use reference::Reference;
+use crate::coordinate::Coordinate;
+use crate::reference::Reference;
 
 pub trait Spheroid: Reference {
     /// Equatorial radius in meters

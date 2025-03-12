@@ -1,7 +1,7 @@
-use perspective::Perspective;
-use position::Position;
-use reference::Reference;
-use screen::Screen;
+use crate::perspective::Perspective;
+use crate::position::Position;
+use crate::reference::Reference;
+use crate::screen::Screen;
 
 //TODO: Turn into trait
 pub struct Viewport<'r, R: Reference + 'r> {

@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
-use hgt::HgtResolution;
+use crate::hgt::HgtResolution;
 
 pub struct HgtFile {
     /// Identifies the southmost latitude

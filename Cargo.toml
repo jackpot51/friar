@@ -2,15 +2,15 @@
 name = "friar"
 version = "0.1.0"
 authors = ["Jeremy Soller <jackpot51@gmail.com>"]
+edition = "2021"
 
 [dependencies]
 csv = "1.0.5"
 dashmap = "3.11.4"
 orbclient = "0.3.20"
 orbfont = "0.1.8"
-osmpbfreader = "0.12.0"
+osmpbfreader = "0.17.0"
 plain = "0.2.3"
-polygon2 = "0.3.0"
 rayon = "1.0.3"
 reqwest = "0.9.6"
 serde = "1.0.86"
